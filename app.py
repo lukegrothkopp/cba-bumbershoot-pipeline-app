@@ -1,1 +1,618 @@
-#app.py
+# app.py Bumbershoot Pipeline Visualization
+from pathlib import Path
+from typing import Tuple
+
+import math
+import numpy as np
+import pandas as pd
+import streamlit as st
+import altair as alt
+
+
+# -------------------------------------------------------------------
+# Config / constants
+# -------------------------------------------------------------------
+
+# Adjust if you name the file differently or put it elsewhere
+DATA_PATH = (
+    Path(__file__).parent
+    / "data"
+    / "Grothko-BumbershootCBA-Prospecting-Testing-New-Version.xlsx"
+)
+
+SPONSORSHIP_SHEET = "Sponsorships"
+PUBLIC_INVESTMENT_SHEET = "Public Investment"
+CONTACT_DETAIL_SHEET = "Contact Detail"
+DATA_DICTIONARY_SHEET = "Data_Dictionary"
+
+PARTNER_TYPE_COL = "Partner Type"
+
+# Core pipeline buckets you described
+STAGE_ORDER = ["Lead", "Under 50%", "50–75%", "Over 75%", "Contracted"]
+HEATMAP_WEEK_ORDER = ["Two Weeks Ago", "Last Week", "This Week"]
+
+
+# -------------------------------------------------------------------
+# Helper functions
+# -------------------------------------------------------------------
+
+def _normalize_partner_type(val: str):
+    """
+    Map free-text values from Contact Detail to normalized partner types.
+    """
+    if pd.isna(val):
+        return None
+    s = str(val).strip().lower()
+    if not s:
+        return None
+    if s.startswith("sponsor"):
+        return "Sponsorship"
+    if s.startswith("public"):
+        return "Public Investment"
+    return None
+
+
+@st.cache_data
+def load_workbook(xlsx_file) -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+    """
+    Load Sponsorships + Public Investment + Contact Detail + Data_Dictionary,
+    combine to a unified prospects table, and compute Stage Bucket.
+    """
+
+    # --- Prospects: Sponsorship + Public Investment ------------------
+    sponsorships = pd.read_excel(xlsx_file, sheet_name=SPONSORSHIP_SHEET)
+    public = pd.read_excel(xlsx_file, sheet_name=PUBLIC_INVESTMENT_SHEET)
+    contacts = pd.read_excel(xlsx_file, sheet_name=CONTACT_DETAIL_SHEET)
+    data_dict = pd.read_excel(xlsx_file, sheet_name=DATA_DICTIONARY_SHEET)
+
+    # Tag each with Partner Type
+    sponsorships[PARTNER_TYPE_COL] = "Sponsorship"
+    public[PARTNER_TYPE_COL] = "Public Investment"
+
+    prospects = pd.concat([sponsorships, public], ignore_index=True)
+
+    # Drop completely empty prospect rows
+    prospects = prospects.dropna(
+        subset=["Prospect ID", "Prospect (Account Name)"], how="all"
+    ).copy()
+
+    # Coerce numeric columns
+    numeric_cols = [
+        "Projected Annual Revenue ($)",
+        "Contracted Annual Revenue ($)",
+        "Probability (%)",
+        "Expected Value ($)",
+        "Term (years)",
+    ]
+    for col in numeric_cols:
+        if col in prospects.columns:
+            prospects[col] = pd.to_numeric(prospects[col], errors="coerce").fillna(0.0)
+
+    # Probability (%) currently stored as 0.0–0.75; convert to 0–100 scale if needed
+    if "Probability (%)" in prospects.columns and not prospects["Probability (%)"].isna().all():
+        max_prob = prospects["Probability (%)"].max()
+        if max_prob <= 1.0:
+            prospects["Probability (%)"] = prospects["Probability (%)"] * 100.0
+
+    # Helpers for stage derivation
+    def _is_flag(val) -> bool:
+        if pd.isna(val):
+            return False
+        s = str(val).strip().lower()
+        return s in ("x", "1", "true", "yes", "y")
+
+    def _compute_stage_bucket(row: pd.Series) -> str:
+        """
+        Derive a single Stage Bucket using:
+        - Dead / Contracted flags + contracted revenue
+        - Probability (%)
+        - Stage flag columns (Lead, Prospect, Under 50%, 50-75%, Over 75%)
+        """
+
+        # 1) Dead overrides everything
+        if "Dead" in row and _is_flag(row["Dead"]):
+            return "Dead"
+
+        # 2) Contracted by flag or revenue
+        contracted_rev = row.get("Contracted Annual Revenue ($)", 0.0)
+        try:
+            contracted_rev = float(contracted_rev)
+        except (TypeError, ValueError):
+            contracted_rev = 0.0
+
+        if ("Contracted" in row and _is_flag(row["Contracted"])) or contracted_rev > 0:
+            return "Contracted"
+
+        # 3) Probability-based logic (0–100 scale)
+        p_raw = row.get("Probability (%)")
+        try:
+            p = float(p_raw)
+        except (TypeError, ValueError):
+            p = float("nan")
+
+        if not math.isnan(p):
+            if p == 0:
+                return "Lead"
+            if p < 50:
+                return "Under 50%"
+            if p < 75:
+                return "50–75%"
+            if p < 100:
+                return "Over 75%"
+            return "Contracted"
+
+        # 4) Fallback to stage flags if no probability
+        stage_cols_map = {
+            "Lead": "Lead",
+            "Prospect": "Lead",      # treat Prospect as Lead bucket for roll-ups
+            "Under 50%": "Under 50%",
+            "50-75%": "50–75%",
+            "Over 75%": "Over 75%",
+        }
+        for col, bucket in stage_cols_map.items():
+            if col in row and _is_flag(row[col]):
+                return bucket
+
+        # Default
+        return "Lead"
+
+    prospects["Stage Bucket"] = prospects.apply(_compute_stage_bucket, axis=1)
+
+    # --- Contacts cleaning -------------------------------------------
+    contacts = contacts.dropna(
+        subset=["Prospect (Account Name)", "Contact Date"], how="all"
+    ).copy()
+
+    for col in ["Contact Date", "Follow-up Date"]:
+        if col in contacts.columns:
+            contacts[col] = pd.to_datetime(contacts[col], errors="coerce")
+
+    return prospects, contacts, data_dict
+
+
+# -------------------------------------------------------------------
+# Visualization blocks
+# -------------------------------------------------------------------
+
+def build_pipeline_board(prospects: pd.DataFrame) -> None:
+    """
+    1) Pipeline stages (Lead → Under 50% → 50–75% → Over 75% → Contracted),
+       each showing prospect, projected revenue, contracted revenue, expected value.
+    """
+    st.markdown("### 1️⃣ Pipeline by Stage")
+
+    # Ignore Dead in the main board
+    df = prospects[prospects["Stage Bucket"] != "Dead"].copy()
+
+    # Tabs by partner type
+    partner_types = sorted(df[PARTNER_TYPE_COL].dropna().unique().tolist())
+    tab_labels = ["All"] + partner_types
+
+    tabs = st.tabs(tab_labels)
+
+    for label, tab in zip(tab_labels, tabs):
+        with tab:
+            if label == "All":
+                subset = df.copy()
+            else:
+                subset = df[df[PARTNER_TYPE_COL] == label].copy()
+
+            if subset.empty:
+                st.caption("No deals in this segment yet.")
+                continue
+
+            cols = st.columns(len(STAGE_ORDER))
+
+            for col, stage in zip(cols, STAGE_ORDER):
+                with col:
+                    stage_df = subset[subset["Stage Bucket"] == stage].copy()
+
+                    stage_df = stage_df[
+                        [
+                            "Prospect (Account Name)",
+                            "Owner",
+                            "Projected Annual Revenue ($)",
+                            "Contracted Annual Revenue ($)",
+                            "Expected Value ($)",
+                        ]
+                    ].sort_values("Expected Value ($)", ascending=False)
+
+                    st.markdown(
+                        f"**{stage}**  \n"
+                        f"<span style='font-size:12px;color:gray;'>"
+                        f"{len(stage_df)} deals"
+                        f"</span>",
+                        unsafe_allow_html=True,
+                    )
+
+                    if stage_df.empty:
+                        st.caption("No deals at this stage.")
+                    else:
+                        st.dataframe(
+                            stage_df.style.format(
+                                {
+                                    "Projected Annual Revenue ($)": "${:,.0f}",
+                                    "Contracted Annual Revenue ($)": "${:,.0f}",
+                                    "Expected Value ($)": "${:,.0f}",
+                                }
+                            ),
+                            hide_index=True,
+                            use_container_width=True,
+                        )
+
+
+def build_top_deals(prospects: pd.DataFrame) -> None:
+    """
+    2) Top 3 Sponsorship & Top 3 Public Investment deals by Expected Value ($).
+    """
+    st.markdown("### 2️⃣ Top Deals by Expected Value")
+
+    def _top_n(df: pd.DataFrame, partner_type: str, n: int = 3) -> pd.DataFrame:
+        sub = df[df[PARTNER_TYPE_COL] == partner_type].copy()
+        if sub.empty:
+            return sub
+        sub = sub.sort_values("Expected Value ($)", ascending=False).head(n)
+        cols = [
+            "Prospect (Account Name)",
+            "Owner",
+            "Stage Bucket",
+            "Expected Value ($)",
+            "Projected Annual Revenue ($)",
+            "Probability (%)",
+        ]
+        cols = [c for c in cols if c in sub.columns]
+        return sub[cols]
+
+    col_left, col_right = st.columns(2)
+
+    with col_left:
+        st.markdown("##### Top Sponsorship Deals")
+        top_spons = _top_n(prospects, "Sponsorship")
+        if top_spons.empty:
+            st.caption("No Sponsorship deals yet.")
+        else:
+            st.dataframe(
+                top_spons.style.format(
+                    {
+                        "Expected Value ($)": "${:,.0f}",
+                        "Projected Annual Revenue ($)": "${:,.0f}",
+                        "Probability (%)": "{:.0f}%",
+                    }
+                ),
+                hide_index=True,
+                use_container_width=True,
+            )
+
+    with col_right:
+        st.markdown("##### Top Public Investment Deals")
+        top_public = _top_n(prospects, "Public Investment")
+        if top_public.empty:
+            st.caption("No Public Investment deals yet.")
+        else:
+            st.dataframe(
+                top_public.style.format(
+                    {
+                        "Expected Value ($)": "${:,.0f}",
+                        "Projected Annual Revenue ($)": "${:,.0f}",
+                        "Probability (%)": "{:.0f}%",
+                    }
+                ),
+                hide_index=True,
+                use_container_width=True,
+            )
+
+
+def build_activity_heatmap(prospects: pd.DataFrame, contacts: pd.DataFrame) -> None:
+    """
+    3) Activity Heat Map:
+       Sponsorship vs Public Investment with This Week / Last Week / Two Weeks Ago.
+    """
+    st.markdown("### 3️⃣ Activity Heat Map (Last 3 Weeks)")
+
+    if contacts.empty or "Contact Date" not in contacts.columns:
+        st.caption("No contact activity data yet.")
+        return
+
+    contacts_enriched = contacts.copy()
+
+    # 1) Bring in Partner Type from prospects via Prospect (Account Name)
+    map_df = (
+        prospects[["Prospect (Account Name)", PARTNER_TYPE_COL]]
+        .dropna()
+        .drop_duplicates()
+    )
+    contacts_enriched = contacts_enriched.merge(
+        map_df, on="Prospect (Account Name)", how="left"
+    )
+
+    # 2) Fallback: Prospect (Sponsorship/Public) column in Contact Detail
+    if "Prospect (Sponsorship/Public)" in contacts_enriched.columns:
+        contacts_enriched["Partner Type contact"] = contacts_enriched[
+            "Prospect (Sponsorship/Public)"
+        ].apply(_normalize_partner_type)
+    else:
+        contacts_enriched["Partner Type contact"] = None
+
+    if PARTNER_TYPE_COL in contacts_enriched.columns:
+        contacts_enriched[PARTNER_TYPE_COL] = contacts_enriched[PARTNER_TYPE_COL].fillna(
+            contacts_enriched["Partner Type contact"]
+        )
+    else:
+        contacts_enriched[PARTNER_TYPE_COL] = contacts_enriched["Partner Type contact"]
+
+    contacts_enriched[PARTNER_TYPE_COL] = contacts_enriched[PARTNER_TYPE_COL].fillna(
+        "Unassigned"
+    )
+
+    # 3) Bucket contact dates into This Week / Last Week / Two Weeks Ago
+    today = pd.Timestamp.today().normalize()
+    start_this_week = today - pd.Timedelta(days=today.weekday())  # Monday
+    start_last_week = start_this_week - pd.Timedelta(weeks=1)
+    start_two_weeks_ago = start_this_week - pd.Timedelta(weeks=2)
+
+    def _bucket_week(d: pd.Timestamp):
+        if pd.isna(d):
+            return None
+        if start_this_week <= d < start_this_week + pd.Timedelta(weeks=1):
+            return "This Week"
+        if start_last_week <= d < start_this_week:
+            return "Last Week"
+        if start_two_weeks_ago <= d < start_last_week:
+            return "Two Weeks Ago"
+        return "Older"
+
+    contacts_enriched["Week Bucket"] = contacts_enriched["Contact Date"].apply(_bucket_week)
+
+    mask_recent = contacts_enriched["Week Bucket"].isin(HEATMAP_WEEK_ORDER)
+    heat_df = (
+        contacts_enriched[mask_recent]
+        .groupby([PARTNER_TYPE_COL, "Week Bucket"])
+        .size()
+        .reset_index(name="Contact Count")
+    )
+
+    if heat_df.empty:
+        st.caption("No activity logged in the last 3 weeks.")
+        return
+
+    heat_df["Week Bucket"] = pd.Categorical(
+        heat_df["Week Bucket"], categories=HEATMAP_WEEK_ORDER, ordered=True
+    )
+
+    chart = (
+        alt.Chart(heat_df)
+        .mark_rect()
+        .encode(
+            x=alt.X("Week Bucket:N", title="", sort=HEATMAP_WEEK_ORDER),
+            y=alt.Y(f"{PARTNER_TYPE_COL}:N", title=""),
+            color=alt.Color(
+                "Contact Count:Q", title="Touches", scale=alt.Scale(scheme="blues")
+            ),
+            tooltip=[PARTNER_TYPE_COL, "Week Bucket", "Contact Count"],
+        )
+        .properties(height=220)
+    )
+
+    st.altair_chart(chart, use_container_width=True)
+
+
+def build_pipeline_totals(prospects: pd.DataFrame) -> None:
+    """
+    4) Total Pipeline Value by Stage:
+       aggregate Expected/Projected/Contracted by Stage Bucket and Partner Type.
+    """
+    st.markdown("### 4️⃣ Total Pipeline Value by Stage")
+
+    # Exclude Dead from pipeline roll-ups
+    df = prospects[prospects["Stage Bucket"] != "Dead"].copy()
+
+    if df.empty:
+        st.caption("No active pipeline data.")
+        return
+
+    agg = (
+        df.groupby(["Stage Bucket", PARTNER_TYPE_COL])
+        .agg(
+            expected_total=("Expected Value ($)", "sum"),
+            projected_total=("Projected Annual Revenue ($)", "sum"),
+            contracted_total=("Contracted Annual Revenue ($)", "sum"),
+            deal_count=("Prospect ID", "nunique"),
+        )
+        .reset_index()
+    )
+
+    # Summary table across all partner types
+    overall = (
+        df.groupby("Stage Bucket")
+        .agg(
+            expected_total=("Expected Value ($)", "sum"),
+            deal_count=("Prospect ID", "nunique"),
+        )
+        .reindex(STAGE_ORDER)
+        .reset_index()
+    )
+
+    with st.expander("Summary table", expanded=True):
+        st.dataframe(
+            overall.style.format({"expected_total": "${:,.0f}"}),
+            hide_index=True,
+            use_container_width=True,
+        )
+
+    chart = (
+        alt.Chart(agg)
+        .mark_bar()
+        .encode(
+            x=alt.X("Stage Bucket:N", sort=STAGE_ORDER, title="Stage"),
+            y=alt.Y("expected_total:Q", title="Total Expected Value ($)"),
+            color=alt.Color(f"{PARTNER_TYPE_COL}:N", title="Type"),
+            tooltip=[
+                "Stage Bucket",
+                PARTNER_TYPE_COL,
+                alt.Tooltip("expected_total:Q", title="Expected Total", format="$.0f"),
+                "deal_count",
+            ],
+        )
+    )
+
+    st.altair_chart(chart, use_container_width=True)
+
+
+def build_recent_activity_table(contacts: pd.DataFrame) -> None:
+    """
+    5) Recent activity feed (last 10 contact events).
+    """
+    st.markdown("### 5️⃣ Recent Activity")
+
+    if contacts.empty:
+        st.caption("No contact activity logged yet.")
+        return
+
+    cols = [
+        "Prospect (Account Name)",
+        "Prospect (Sponsorship/Public)",
+        "Contact Date",
+        "Contact Type (email/phone/zoom/in-person)",
+        "Contact Owner",
+        "Contact Name",
+        "Outcome (left VM/spoke/meeting set/sent deck/etc.)",
+        "Next Step",
+    ]
+    cols = [c for c in cols if c in contacts.columns]
+
+    recent = (
+        contacts.sort_values("Contact Date", ascending=False)
+        .head(10)
+        .loc[:, cols]
+        .copy()
+    )
+
+    st.dataframe(
+        recent.style.format({"Contact Date": "{:%Y-%m-%d}"}),
+        hide_index=True,
+        use_container_width=True,
+    )
+
+
+def build_data_dictionary(data_dict: pd.DataFrame) -> None:
+    """
+    Optional: show your Data_Dictionary sheet so anyone using the app
+    can remind themselves what each field means.
+    """
+    if data_dict is None or data_dict.empty:
+        return
+
+    with st.expander("ℹ️ Data Dictionary (field definitions)", expanded=False):
+        st.dataframe(
+            data_dict,
+            hide_index=True,
+            use_container_width=True,
+        )
+
+
+# -------------------------------------------------------------------
+# Main app
+# -------------------------------------------------------------------
+
+def main() -> None:
+    st.set_page_config(
+        page_title="Bumbershoot / Cannonball – Revenue Pipeline",
+        page_icon="🎟️",
+        layout="wide",
+    )
+
+    st.title("Bumbershoot & Cannonball – Revenue Pipeline")
+    st.caption(
+        "Split view for **Sponsorship (Corporate Partnerships)** "
+        "and **Public Investment** deals."
+    )
+
+    # Sidebar: data source
+    st.sidebar.header("Data source")
+    st.sidebar.write(
+        "Upload an updated copy of the prospecting workbook, or "
+        "use the sample file bundled with this app."
+    )
+
+    uploaded = st.sidebar.file_uploader(
+        "Upload Excel workbook (.xlsx)",
+        type=["xlsx"],
+        accept_multiple_files=False,
+    )
+
+    if uploaded is not None:
+        xlsx_source = uploaded
+    elif DATA_PATH.exists():
+        xlsx_source = DATA_PATH
+        st.sidebar.info(f"Using bundled sample file: `{DATA_PATH.name}`")
+    else:
+        st.error("No data file found. Please upload the Excel workbook to continue.")
+        st.stop()
+
+    prospects, contacts, data_dict = load_workbook(xlsx_source)
+
+    # Sidebar filters
+    st.sidebar.header("Filters")
+
+    # Partner type filter
+    partner_types = sorted(prospects[PARTNER_TYPE_COL].dropna().unique().tolist())
+    selected_partner_types = st.sidebar.multiselect(
+        "Partner Type",
+        options=partner_types,
+        default=partner_types,
+    )
+
+    # Owner filter
+    owner_options = sorted(prospects["Owner"].dropna().unique().tolist())
+    selected_owners = st.sidebar.multiselect(
+        "Owner (AE)",
+        options=owner_options,
+        default=owner_options,
+    )
+
+    # Apply filters
+    filtered_prospects = prospects[
+        prospects[PARTNER_TYPE_COL].isin(selected_partner_types)
+        & prospects["Owner"].isin(selected_owners)
+    ].copy()
+
+    # Snapshot KPIs
+    st.markdown("### Snapshot")
+
+    total_expected = filtered_prospects["Expected Value ($)"].sum()
+    total_projected = filtered_prospects["Projected Annual Revenue ($)"].sum()
+    total_contracted = filtered_prospects["Contracted Annual Revenue ($)"].sum()
+    deal_count = filtered_prospects["Prospect ID"].nunique()
+
+    col1, col2, col3, col4 = st.columns(4)
+    col1.metric("Total Expected Value", f"${total_expected:,.0f}")
+    col2.metric("Projected Annual", f"${total_projected:,.0f}")
+    col3.metric("Contracted Annual", f"${total_contracted:,.0f}")
+    col4.metric("Active Prospects", int(deal_count))
+
+    build_data_dictionary(data_dict)
+
+    st.divider()
+
+    # 1) Pipeline board
+    build_pipeline_board(filtered_prospects)
+    st.divider()
+
+    # 2) Top deals
+    build_top_deals(filtered_prospects)
+    st.divider()
+
+    # 3) Activity heat map (uses full contacts but still informative)
+    build_activity_heatmap(prospects, contacts)
+    st.divider()
+
+    # 4) Pipeline totals
+    build_pipeline_totals(filtered_prospects)
+    st.divider()
+
+    # 5) Recent activity
+    build_recent_activity_table(contacts)
+
+
+if __name__ == "__main__":
+    main()
