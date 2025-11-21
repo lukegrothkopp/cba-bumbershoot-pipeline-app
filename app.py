@@ -1,24 +1,14 @@
-# app.py Bumbershoot Pipeline Visualization
-from pathlib import Path
 from typing import Tuple
-
 import math
+
 import numpy as np
 import pandas as pd
 import streamlit as st
 import altair as alt
 
-
 # -------------------------------------------------------------------
 # Config / constants
 # -------------------------------------------------------------------
-
-# Adjust if you name the file differently or put it elsewhere
-DATA_PATH = (
-    Path(__file__).parent
-    / "data"
-    / "Grothko-BumbershootCBA-Prospecting-Testing-New-Version.xlsx"
-)
 
 SPONSORSHIP_SHEET = "Sponsorships"
 PUBLIC_INVESTMENT_SHEET = "Public Investment"
@@ -27,7 +17,6 @@ DATA_DICTIONARY_SHEET = "Data_Dictionary"
 
 PARTNER_TYPE_COL = "Partner Type"
 
-# Core pipeline buckets you described
 STAGE_ORDER = ["Lead", "Under 50%", "50–75%", "Over 75%", "Contracted"]
 HEATMAP_WEEK_ORDER = ["Two Weeks Ago", "Last Week", "This Week"]
 
@@ -37,9 +26,7 @@ HEATMAP_WEEK_ORDER = ["Two Weeks Ago", "Last Week", "This Week"]
 # -------------------------------------------------------------------
 
 def _normalize_partner_type(val: str):
-    """
-    Map free-text values from Contact Detail to normalized partner types.
-    """
+    """Map free-text values from Contact Detail to normalized partner types."""
     if pd.isna(val):
         return None
     s = str(val).strip().lower()
@@ -52,18 +39,21 @@ def _normalize_partner_type(val: str):
     return None
 
 
-@st.cache_data
 def load_workbook(xlsx_file) -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
     """
-    Load Sponsorships + Public Investment + Contact Detail + Data_Dictionary,
-    combine to a unified prospects table, and compute Stage Bucket.
+    Load Sponsorships + Public Investment + Contact Detail + Data_Dictionary
+    from the uploaded Excel workbook, combine to a unified prospects table,
+    and compute Stage Bucket.
     """
-
-    # --- Prospects: Sponsorship + Public Investment ------------------
-    sponsorships = pd.read_excel(xlsx_file, sheet_name=SPONSORSHIP_SHEET)
-    public = pd.read_excel(xlsx_file, sheet_name=PUBLIC_INVESTMENT_SHEET)
-    contacts = pd.read_excel(xlsx_file, sheet_name=CONTACT_DETAIL_SHEET)
-    data_dict = pd.read_excel(xlsx_file, sheet_name=DATA_DICTIONARY_SHEET)
+    try:
+        sponsorships = pd.read_excel(xlsx_file, sheet_name=SPONSORSHIP_SHEET)
+        public = pd.read_excel(xlsx_file, sheet_name=PUBLIC_INVESTMENT_SHEET)
+        contacts = pd.read_excel(xlsx_file, sheet_name=CONTACT_DETAIL_SHEET)
+        data_dict = pd.read_excel(xlsx_file, sheet_name=DATA_DICTIONARY_SHEET)
+    except Exception as e:
+        st.error("There was a problem reading one or more sheets from the workbook.")
+        st.exception(e)
+        st.stop()
 
     # Tag each with Partner Type
     sponsorships[PARTNER_TYPE_COL] = "Sponsorship"
@@ -72,6 +62,11 @@ def load_workbook(xlsx_file) -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
     prospects = pd.concat([sponsorships, public], ignore_index=True)
 
     # Drop completely empty prospect rows
+    for col in ["Prospect ID", "Prospect (Account Name)"]:
+        if col not in prospects.columns:
+            st.error(f"Expected column `{col}` not found in prospects sheets.")
+            st.stop()
+
     prospects = prospects.dropna(
         subset=["Prospect ID", "Prospect (Account Name)"], how="all"
     ).copy()
@@ -159,6 +154,10 @@ def load_workbook(xlsx_file) -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
     prospects["Stage Bucket"] = prospects.apply(_compute_stage_bucket, axis=1)
 
     # --- Contacts cleaning -------------------------------------------
+    if "Prospect (Account Name)" not in contacts.columns:
+        st.error("Expected column `Prospect (Account Name)` not found in Contact Detail.")
+        st.stop()
+
     contacts = contacts.dropna(
         subset=["Prospect (Account Name)", "Contact Date"], how="all"
     ).copy()
@@ -175,14 +174,15 @@ def load_workbook(xlsx_file) -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
 # -------------------------------------------------------------------
 
 def build_pipeline_board(prospects: pd.DataFrame) -> None:
-    """
-    1) Pipeline stages (Lead → Under 50% → 50–75% → Over 75% → Contracted),
-       each showing prospect, projected revenue, contracted revenue, expected value.
-    """
+    """1) Pipeline stages board."""
     st.markdown("### 1️⃣ Pipeline by Stage")
 
     # Ignore Dead in the main board
     df = prospects[prospects["Stage Bucket"] != "Dead"].copy()
+
+    if df.empty:
+        st.caption("No active prospects in the pipeline.")
+        return
 
     # Tabs by partner type
     partner_types = sorted(df[PARTNER_TYPE_COL].dropna().unique().tolist())
@@ -207,15 +207,18 @@ def build_pipeline_board(prospects: pd.DataFrame) -> None:
                 with col:
                     stage_df = subset[subset["Stage Bucket"] == stage].copy()
 
-                    stage_df = stage_df[
-                        [
-                            "Prospect (Account Name)",
-                            "Owner",
-                            "Projected Annual Revenue ($)",
-                            "Contracted Annual Revenue ($)",
-                            "Expected Value ($)",
-                        ]
-                    ].sort_values("Expected Value ($)", ascending=False)
+                    cols_to_show = [
+                        "Prospect (Account Name)",
+                        "Owner",
+                        "Projected Annual Revenue ($)",
+                        "Contracted Annual Revenue ($)",
+                        "Expected Value ($)",
+                    ]
+                    cols_to_show = [c for c in cols_to_show if c in stage_df.columns]
+
+                    stage_df = stage_df[cols_to_show].sort_values(
+                        "Expected Value ($)", ascending=False
+                    )
 
                     st.markdown(
                         f"**{stage}**  \n"
@@ -242,9 +245,7 @@ def build_pipeline_board(prospects: pd.DataFrame) -> None:
 
 
 def build_top_deals(prospects: pd.DataFrame) -> None:
-    """
-    2) Top 3 Sponsorship & Top 3 Public Investment deals by Expected Value ($).
-    """
+    """2) Top 3 Sponsorship & Top 3 Public Investment deals by Expected Value ($)."""
     st.markdown("### 2️⃣ Top Deals by Expected Value")
 
     def _top_n(df: pd.DataFrame, partner_type: str, n: int = 3) -> pd.DataFrame:
@@ -303,10 +304,7 @@ def build_top_deals(prospects: pd.DataFrame) -> None:
 
 
 def build_activity_heatmap(prospects: pd.DataFrame, contacts: pd.DataFrame) -> None:
-    """
-    3) Activity Heat Map:
-       Sponsorship vs Public Investment with This Week / Last Week / Two Weeks Ago.
-    """
+    """3) Activity heat map: Sponsorship vs Public, last 3 weeks."""
     st.markdown("### 3️⃣ Activity Heat Map (Last 3 Weeks)")
 
     if contacts.empty or "Contact Date" not in contacts.columns:
@@ -361,7 +359,9 @@ def build_activity_heatmap(prospects: pd.DataFrame, contacts: pd.DataFrame) -> N
             return "Two Weeks Ago"
         return "Older"
 
-    contacts_enriched["Week Bucket"] = contacts_enriched["Contact Date"].apply(_bucket_week)
+    contacts_enriched["Week Bucket"] = contacts_enriched["Contact Date"].apply(
+        _bucket_week
+    )
 
     mask_recent = contacts_enriched["Week Bucket"].isin(HEATMAP_WEEK_ORDER)
     heat_df = (
@@ -397,10 +397,7 @@ def build_activity_heatmap(prospects: pd.DataFrame, contacts: pd.DataFrame) -> N
 
 
 def build_pipeline_totals(prospects: pd.DataFrame) -> None:
-    """
-    4) Total Pipeline Value by Stage:
-       aggregate Expected/Projected/Contracted by Stage Bucket and Partner Type.
-    """
+    """4) Total Pipeline Value by Stage."""
     st.markdown("### 4️⃣ Total Pipeline Value by Stage")
 
     # Exclude Dead from pipeline roll-ups
@@ -459,9 +456,7 @@ def build_pipeline_totals(prospects: pd.DataFrame) -> None:
 
 
 def build_recent_activity_table(contacts: pd.DataFrame) -> None:
-    """
-    5) Recent activity feed (last 10 contact events).
-    """
+    """5) Recent activity feed (last 10 contact events)."""
     st.markdown("### 5️⃣ Recent Activity")
 
     if contacts.empty:
@@ -495,10 +490,7 @@ def build_recent_activity_table(contacts: pd.DataFrame) -> None:
 
 
 def build_data_dictionary(data_dict: pd.DataFrame) -> None:
-    """
-    Optional: show your Data_Dictionary sheet so anyone using the app
-    can remind themselves what each field means.
-    """
+    """Show Data_Dictionary sheet, if present."""
     if data_dict is None or data_dict.empty:
         return
 
@@ -523,38 +515,37 @@ def main() -> None:
 
     st.title("Bumbershoot & Cannonball – Revenue Pipeline")
     st.caption(
-        "Split view for **Sponsorship (Corporate Partnerships)** "
-        "and **Public Investment** deals."
+        "Upload the latest Excel workbook for a split view of "
+        "**Sponsorship (Corporate Partnerships)** and **Public Investment**."
     )
 
     # Sidebar: data source
     st.sidebar.header("Data source")
-    st.sidebar.write(
-        "Upload an updated copy of the prospecting workbook, or "
-        "use the sample file bundled with this app."
-    )
 
     uploaded = st.sidebar.file_uploader(
-        "Upload Excel workbook (.xlsx)",
+        "Upload latest Excel workbook (.xlsx)",
         type=["xlsx"],
         accept_multiple_files=False,
     )
 
-    if uploaded is not None:
-        xlsx_source = uploaded
-    elif DATA_PATH.exists():
-        xlsx_source = DATA_PATH
-        st.sidebar.info(f"Using bundled sample file: `{DATA_PATH.name}`")
-    else:
-        st.error("No data file found. Please upload the Excel workbook to continue.")
+    if uploaded is None:
+        st.info(
+            "⬅️ Please upload the latest Excel workbook to see the dashboard.\n\n"
+            "Recommended: use the file you update weekly before your team meeting."
+        )
         st.stop()
 
-    prospects, contacts, data_dict = load_workbook(xlsx_source)
+    # Load data
+    prospects, contacts, data_dict = load_workbook(uploaded)
 
     # Sidebar filters
     st.sidebar.header("Filters")
 
     # Partner type filter
+    if PARTNER_TYPE_COL not in prospects.columns:
+        st.error(f"Expected column `{PARTNER_TYPE_COL}` not found in prospect data.")
+        st.stop()
+
     partner_types = sorted(prospects[PARTNER_TYPE_COL].dropna().unique().tolist())
     selected_partner_types = st.sidebar.multiselect(
         "Partner Type",
@@ -562,27 +553,31 @@ def main() -> None:
         default=partner_types,
     )
 
-    # Owner filter
-    owner_options = sorted(prospects["Owner"].dropna().unique().tolist())
-    selected_owners = st.sidebar.multiselect(
-        "Owner (AE)",
-        options=owner_options,
-        default=owner_options,
-    )
+    # Owner filter (if present)
+    if "Owner" in prospects.columns:
+        owner_options = sorted(prospects["Owner"].dropna().unique().tolist())
+        selected_owners = st.sidebar.multiselect(
+            "Owner (AE)",
+            options=owner_options,
+            default=owner_options,
+        )
+        mask_owner = prospects["Owner"].isin(selected_owners)
+    else:
+        selected_owners = []
+        mask_owner = True
 
     # Apply filters
     filtered_prospects = prospects[
-        prospects[PARTNER_TYPE_COL].isin(selected_partner_types)
-        & prospects["Owner"].isin(selected_owners)
+        prospects[PARTNER_TYPE_COL].isin(selected_partner_types) & mask_owner
     ].copy()
 
     # Snapshot KPIs
     st.markdown("### Snapshot")
 
-    total_expected = filtered_prospects["Expected Value ($)"].sum()
-    total_projected = filtered_prospects["Projected Annual Revenue ($)"].sum()
-    total_contracted = filtered_prospects["Contracted Annual Revenue ($)"].sum()
-    deal_count = filtered_prospects["Prospect ID"].nunique()
+    total_expected = filtered_prospects.get("Expected Value ($)", pd.Series(dtype=float)).sum()
+    total_projected = filtered_prospects.get("Projected Annual Revenue ($)", pd.Series(dtype=float)).sum()
+    total_contracted = filtered_prospects.get("Contracted Annual Revenue ($)", pd.Series(dtype=float)).sum()
+    deal_count = filtered_prospects.get("Prospect ID", pd.Series(dtype=object)).nunique()
 
     col1, col2, col3, col4 = st.columns(4)
     col1.metric("Total Expected Value", f"${total_expected:,.0f}")
