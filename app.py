@@ -301,6 +301,97 @@ def build_top_deals(prospects: pd.DataFrame) -> None:
                 hide_index=True,
                 use_container_width=True,
             )
+def build_activity_heatmap(prospects: pd.DataFrame, contacts: pd.DataFrame) -> None:
+    """3) Activity heat map: Sponsorship vs Public, last 3 weeks."""
+    st.markdown("### Activity Heat Map (Last 3 Weeks)")
+
+    if contacts.empty or "Contact Date" not in contacts.columns:
+        st.caption("No contact activity data yet.")
+        return
+
+    contacts_enriched = contacts.copy()
+
+    # 1) Bring in Partner Type from prospects via Prospect (Account Name)
+    map_df = (
+        prospects[["Prospect (Account Name)", PARTNER_TYPE_COL]]
+        .dropna()
+        .drop_duplicates()
+    )
+    contacts_enriched = contacts_enriched.merge(
+        map_df, on="Prospect (Account Name)", how="left"
+    )
+
+    # 2) Fallback: Prospect (Sponsorship/Public) column in Contact Detail
+    if "Prospect (Sponsorship/Public)" in contacts_enriched.columns:
+        contacts_enriched["Partner Type contact"] = contacts_enriched[
+            "Prospect (Sponsorship/Public)"
+        ].apply(_normalize_partner_type)
+    else:
+        contacts_enriched["Partner Type contact"] = None
+
+    if PARTNER_TYPE_COL in contacts_enriched.columns:
+        contacts_enriched[PARTNER_TYPE_COL] = contacts_enriched[PARTNER_TYPE_COL].fillna(
+            contacts_enriched["Partner Type contact"]
+        )
+    else:
+        contacts_enriched[PARTNER_TYPE_COL] = contacts_enriched["Partner Type contact"]
+
+    contacts_enriched[PARTNER_TYPE_COL] = contacts_enriched[PARTNER_TYPE_COL].fillna(
+        "Unassigned"
+    )
+
+    # 3) Bucket contact dates into This Week / Last Week / Two Weeks Ago
+    today = pd.Timestamp.today().normalize()
+    start_this_week = today - pd.Timedelta(days=today.weekday())  # Monday
+    start_last_week = start_this_week - pd.Timedelta(weeks=1)
+    start_two_weeks_ago = start_this_week - pd.Timedelta(weeks=2)
+
+    def _bucket_week(d: pd.Timestamp):
+        if pd.isna(d):
+            return None
+        if start_this_week <= d < start_this_week + pd.Timedelta(weeks=1):
+            return "This Week"
+        if start_last_week <= d < start_this_week:
+            return "Last Week"
+        if start_two_weeks_ago <= d < start_last_week:
+            return "Two Weeks Ago"
+        return "Older"
+
+    contacts_enriched["Week Bucket"] = contacts_enriched["Contact Date"].apply(
+        _bucket_week
+    )
+
+    mask_recent = contacts_enriched["Week Bucket"].isin(HEATMAP_WEEK_ORDER)
+    heat_df = (
+        contacts_enriched[mask_recent]
+        .groupby([PARTNER_TYPE_COL, "Week Bucket"])
+        .size()
+        .reset_index(name="Contact Count")
+    )
+
+    if heat_df.empty:
+        st.caption("No activity logged in the last 3 weeks.")
+        return
+
+    heat_df["Week Bucket"] = pd.Categorical(
+        heat_df["Week Bucket"], categories=HEATMAP_WEEK_ORDER, ordered=True
+    )
+
+    chart = (
+        alt.Chart(heat_df)
+        .mark_rect()
+        .encode(
+            x=alt.X("Week Bucket:N", title="", sort=HEATMAP_WEEK_ORDER),
+            y=alt.Y(f"{PARTNER_TYPE_COL}:N", title=""),
+            color=alt.Color(
+                "Contact Count:Q", title="Touches", scale=alt.Scale(scheme="blues")
+            ),
+            tooltip=[PARTNER_TYPE_COL, "Week Bucket", "Contact Count"],
+        )
+        .properties(height=220)
+    )
+
+    st.altair_chart(chart, use_container_width=True)
 
 def build_pipeline_totals(prospects: pd.DataFrame) -> None:
     """4) Total Pipeline Value by Stage."""
