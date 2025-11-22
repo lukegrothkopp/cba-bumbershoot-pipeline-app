@@ -172,6 +172,64 @@ def load_workbook(xlsx_file) -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
 # Visualization blocks
 # -------------------------------------------------------------------
 
+def build_top_deals(prospects: pd.DataFrame) -> None:
+    """2) Top 3 Sponsorship & Top 3 Public Investment deals by Expected Value ($)."""
+    st.markdown("### Top Deals by Expected Value")
+
+    def _top_n(df: pd.DataFrame, partner_type: str, n: int = 3) -> pd.DataFrame:
+        sub = df[df[PARTNER_TYPE_COL] == partner_type].copy()
+        if sub.empty:
+            return sub
+        sub = sub.sort_values("Expected Value ($)", ascending=False).head(n)
+        cols = [
+            "Prospect (Account Name)",
+            "Owner",
+            "Stage Bucket",
+            "Expected Value ($)",
+            "Projected Annual Revenue ($)",
+            "Probability (%)",
+        ]
+        cols = [c for c in cols if c in sub.columns]
+        return sub[cols]
+
+    col_left, col_right = st.columns(2)
+
+    with col_left:
+        st.markdown("##### Top Sponsorship Deals")
+        top_spons = _top_n(prospects, "Sponsorship")
+        if top_spons.empty:
+            st.caption("No Sponsorship deals yet.")
+        else:
+            st.dataframe(
+                top_spons.style.format(
+                    {
+                        "Expected Value ($)": "${:,.0f}",
+                        "Projected Annual Revenue ($)": "${:,.0f}",
+                        "Probability (%)": "{:.0f}%",
+                    }
+                ),
+                hide_index=True,
+                use_container_width=True,
+            )
+
+    with col_right:
+        st.markdown("##### Top Public Investment Deals")
+        top_public = _top_n(prospects, "Public Investment")
+        if top_public.empty:
+            st.caption("No Public Investment deals yet.")
+        else:
+            st.dataframe(
+                top_public.style.format(
+                    {
+                        "Expected Value ($)": "${:,.0f}",
+                        "Projected Annual Revenue ($)": "${:,.0f}",
+                        "Probability (%)": "{:.0f}%",
+                    }
+                ),
+                hide_index=True,
+                use_container_width=True,
+            )
+
 def build_pipeline_board(prospects: pd.DataFrame) -> None:
     """1) Pipeline stages board."""
     st.markdown("### Pipeline by Stage")
@@ -241,65 +299,6 @@ def build_pipeline_board(prospects: pd.DataFrame) -> None:
                             hide_index=True,
                             use_container_width=True,
                         )
-
-
-def build_top_deals(prospects: pd.DataFrame) -> None:
-    """2) Top 3 Sponsorship & Top 3 Public Investment deals by Expected Value ($)."""
-    st.markdown("### Top Deals by Expected Value")
-
-    def _top_n(df: pd.DataFrame, partner_type: str, n: int = 3) -> pd.DataFrame:
-        sub = df[df[PARTNER_TYPE_COL] == partner_type].copy()
-        if sub.empty:
-            return sub
-        sub = sub.sort_values("Expected Value ($)", ascending=False).head(n)
-        cols = [
-            "Prospect (Account Name)",
-            "Owner",
-            "Stage Bucket",
-            "Expected Value ($)",
-            "Projected Annual Revenue ($)",
-            "Probability (%)",
-        ]
-        cols = [c for c in cols if c in sub.columns]
-        return sub[cols]
-
-    col_left, col_right = st.columns(2)
-
-    with col_left:
-        st.markdown("##### Top Sponsorship Deals")
-        top_spons = _top_n(prospects, "Sponsorship")
-        if top_spons.empty:
-            st.caption("No Sponsorship deals yet.")
-        else:
-            st.dataframe(
-                top_spons.style.format(
-                    {
-                        "Expected Value ($)": "${:,.0f}",
-                        "Projected Annual Revenue ($)": "${:,.0f}",
-                        "Probability (%)": "{:.0f}%",
-                    }
-                ),
-                hide_index=True,
-                use_container_width=True,
-            )
-
-    with col_right:
-        st.markdown("##### Top Public Investment Deals")
-        top_public = _top_n(prospects, "Public Investment")
-        if top_public.empty:
-            st.caption("No Public Investment deals yet.")
-        else:
-            st.dataframe(
-                top_public.style.format(
-                    {
-                        "Expected Value ($)": "${:,.0f}",
-                        "Projected Annual Revenue ($)": "${:,.0f}",
-                        "Probability (%)": "{:.0f}%",
-                    }
-                ),
-                hide_index=True,
-                use_container_width=True,
-            )
 
 def build_pipeline_totals(prospects: pd.DataFrame) -> None:
     """4) Total Pipeline Value by Stage."""
