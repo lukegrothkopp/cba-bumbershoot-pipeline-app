@@ -508,12 +508,12 @@ def build_data_dictionary(data_dict: pd.DataFrame) -> None:
 
 def main() -> None:
     st.set_page_config(
-        page_title="Bumbershoot / Cannonball – Revenue Pipeline",
+        page_title="Bumbershoot / Cannonball – Partnership Revenue Pipeline",
         page_icon="🎟️",
         layout="wide",
     )
 
-    st.title("Bumbershoot & Cannonball – Revenue Pipeline")
+    st.title("Bumbershoot & Cannonball – Partnership Revenue Pipeline")
     st.caption(
         "Upload the latest Excel workbook for a split view of "
         "**Sponsorship (Corporate Partnerships)** and **Public Investment**."
