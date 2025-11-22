@@ -175,7 +175,7 @@ def load_workbook(xlsx_file) -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
 
 def build_pipeline_board(prospects: pd.DataFrame) -> None:
     """1) Pipeline stages board."""
-    st.markdown("### 1️⃣ Pipeline by Stage")
+    st.markdown("### Pipeline by Stage")
 
     # Ignore Dead in the main board
     df = prospects[prospects["Stage Bucket"] != "Dead"].copy()
@@ -246,7 +246,7 @@ def build_pipeline_board(prospects: pd.DataFrame) -> None:
 
 def build_top_deals(prospects: pd.DataFrame) -> None:
     """2) Top 3 Sponsorship & Top 3 Public Investment deals by Expected Value ($)."""
-    st.markdown("### 2️⃣ Top Deals by Expected Value")
+    st.markdown("### Top Deals by Expected Value")
 
     def _top_n(df: pd.DataFrame, partner_type: str, n: int = 3) -> pd.DataFrame:
         sub = df[df[PARTNER_TYPE_COL] == partner_type].copy()
@@ -305,7 +305,7 @@ def build_top_deals(prospects: pd.DataFrame) -> None:
 
 def build_activity_heatmap(prospects: pd.DataFrame, contacts: pd.DataFrame) -> None:
     """3) Activity heat map: Sponsorship vs Public, last 3 weeks."""
-    st.markdown("### 3️⃣ Activity Heat Map (Last 3 Weeks)")
+    st.markdown("### Activity Heat Map (Last 3 Weeks)")
 
     if contacts.empty or "Contact Date" not in contacts.columns:
         st.caption("No contact activity data yet.")
@@ -398,7 +398,7 @@ def build_activity_heatmap(prospects: pd.DataFrame, contacts: pd.DataFrame) -> N
 
 def build_pipeline_totals(prospects: pd.DataFrame) -> None:
     """4) Total Pipeline Value by Stage."""
-    st.markdown("### 4️⃣ Total Pipeline Value by Stage")
+    st.markdown("### Total Pipeline Value by Stage")
 
     # Exclude Dead from pipeline roll-ups
     df = prospects[prospects["Stage Bucket"] != "Dead"].copy()
@@ -457,7 +457,7 @@ def build_pipeline_totals(prospects: pd.DataFrame) -> None:
 
 def build_recent_activity_table(contacts: pd.DataFrame) -> None:
     """5) Recent activity feed (last 10 contact events)."""
-    st.markdown("### 5️⃣ Recent Activity")
+    st.markdown("### Recent Activity")
 
     if contacts.empty:
         st.caption("No contact activity logged yet.")
@@ -494,7 +494,7 @@ def build_data_dictionary(data_dict: pd.DataFrame) -> None:
     if data_dict is None or data_dict.empty:
         return
 
-    with st.expander("ℹ️ Data Dictionary (field definitions)", expanded=False):
+    with st.expander("Data Dictionary (field definitions)", expanded=False):
         st.dataframe(
             data_dict,
             hide_index=True,
