@@ -230,8 +230,9 @@ def build_top_deals(prospects: pd.DataFrame) -> None:
                 use_container_width=True,
             )
 
+
 def build_pipeline_board(prospects: pd.DataFrame) -> None:
-    """1) Pipeline stages board."""
+    """3) Pipeline stages board."""
     st.markdown("### Pipeline by Stage")
 
     # Ignore Dead in the main board
@@ -299,6 +300,7 @@ def build_pipeline_board(prospects: pd.DataFrame) -> None:
                             hide_index=True,
                             use_container_width=True,
                         )
+
 
 def build_pipeline_totals(prospects: pd.DataFrame) -> None:
     """4) Total Pipeline Value by Stage."""
@@ -475,7 +477,7 @@ def main() -> None:
         prospects[PARTNER_TYPE_COL].isin(selected_partner_types) & mask_owner
     ].copy()
 
-    # Snapshot KPIs
+    # 1) Snapshot KPIs
     st.markdown("### Snapshot")
 
     total_expected = filtered_prospects.get("Expected Value ($)", pd.Series(dtype=float)).sum()
@@ -489,25 +491,28 @@ def main() -> None:
     col3.metric("Contracted Annual", f"${total_contracted:,.0f}")
     col4.metric("Active Prospects", int(deal_count))
 
-    build_data_dictionary(data_dict)
-
     st.divider()
 
-    # 1) Pipeline board
-    build_pipeline_board(filtered_prospects)
-    st.divider()
-
-    # 2) Top deals
+    # 2) Top Deals by Expected Value
     build_top_deals(filtered_prospects)
     st.divider()
 
-    # 4) Pipeline totals
+    # 3) Pipeline by Stage
+    build_pipeline_board(filtered_prospects)
+    st.divider()
+
+    # 4) Total Pipeline Value by Stage
     build_pipeline_totals(filtered_prospects)
     st.divider()
 
-    # 5) Recent activity
+    # 5) Recent Activity
     build_recent_activity_table(contacts)
+    st.divider()
+
+    # Extra: Data Dictionary at the bottom
+    build_data_dictionary(data_dict)
 
 
 if __name__ == "__main__":
     main()
+
