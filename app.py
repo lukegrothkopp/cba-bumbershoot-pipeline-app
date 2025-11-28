@@ -334,14 +334,15 @@ def build_pipeline_totals(prospects: pd.DataFrame) -> None:
         .reset_index()
     )
 
-    # 🔹 Make sure deal_count is integer & format with no decimals
-    overall["deal_count"] = overall["deal_count"].astype(int)
+    # Fill NaNs (from missing stages) before casting to int
+    overall["deal_count"] = overall["deal_count"].fillna(0).astype(int)
+    overall["expected_total"] = overall["expected_total"].fillna(0.0)
 
     with st.expander("Summary table", expanded=True):
         st.dataframe(
             overall.style.format({
                 "expected_total": "${:,.0f}",
-                "deal_count": "{:,.0f}",  # or just "{}" if you don't want commas
+                "deal_count": "{:,.0f}",  # whole numbers, no decimal places
             }),
             hide_index=True,
             use_container_width=True,
