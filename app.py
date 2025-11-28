@@ -301,7 +301,6 @@ def build_pipeline_board(prospects: pd.DataFrame) -> None:
                             use_container_width=True,
                         )
 
-
 def build_pipeline_totals(prospects: pd.DataFrame) -> None:
     """4) Total Pipeline Value by Stage."""
     st.markdown("### Total Pipeline Value by Stage")
@@ -335,9 +334,15 @@ def build_pipeline_totals(prospects: pd.DataFrame) -> None:
         .reset_index()
     )
 
+    # 🔹 Make sure deal_count is integer & format with no decimals
+    overall["deal_count"] = overall["deal_count"].astype(int)
+
     with st.expander("Summary table", expanded=True):
         st.dataframe(
-            overall.style.format({"expected_total": "${:,.0f}"}),
+            overall.style.format({
+                "expected_total": "${:,.0f}",
+                "deal_count": "{:,.0f}",  # or just "{}" if you don't want commas
+            }),
             hide_index=True,
             use_container_width=True,
         )
@@ -359,7 +364,6 @@ def build_pipeline_totals(prospects: pd.DataFrame) -> None:
     )
 
     st.altair_chart(chart, use_container_width=True)
-
 
 def build_recent_activity_table(contacts: pd.DataFrame) -> None:
     """5) Recent activity feed (last 10 contact events)."""
