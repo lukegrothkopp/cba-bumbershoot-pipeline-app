@@ -173,10 +173,10 @@ def load_workbook(xlsx_file) -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
 # -------------------------------------------------------------------
 
 def build_top_deals(prospects: pd.DataFrame) -> None:
-    """2) Top 5 Sponsorship & Top 5 Public Investment deals by Expected Value ($)."""
-    st.markdown("### Top 5 Deals by Expected Value")
+    """2) Top 10 Sponsorship & Top 10 Public Investment deals by Expected Value ($)."""
+    st.markdown("### Top 10 Deals by Expected Value")
 
-    def _top_n(df: pd.DataFrame, partner_type: str, n: int = 5) -> pd.DataFrame:
+    def _top_n(df: pd.DataFrame, partner_type: str, n: int = 10) -> pd.DataFrame:
         sub = df[df[PARTNER_TYPE_COL] == partner_type].copy()
         if sub.empty:
             return sub
