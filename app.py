@@ -2,6 +2,7 @@
 from typing import Tuple
 import math
 from html import escape
+import textwrap
 
 import numpy as np
 import pandas as pd
@@ -766,22 +767,22 @@ def build_pipeline_totals(prospects: pd.DataFrame) -> None:
 
 
 def _property_dots_html(row: pd.Series) -> str:
-    dot_b = f"""
-        <span class="property-dot {'inactive' if not bool(row.get('Has Bumbershoot Interest', False)) else ''}"
-              style="background:{PROPERTY_COLORS['Bumbershoot']};"></span>
-    """
-    dot_c = f"""
-        <span class="property-dot {'inactive' if not bool(row.get('Has Cannonball Interest', False)) else ''}"
-              style="background:{PROPERTY_COLORS['Cannonball Arts']};"></span>
-    """
-    return f'<span class="property-dots">{dot_b}{dot_c}</span>'
+    b_class = "property-dot" if bool(row.get("Has Bumbershoot Interest", False)) else "property-dot inactive"
+    c_class = "property-dot" if bool(row.get("Has Cannonball Interest", False)) else "property-dot inactive"
+    return (
+        f'<span class="property-dots">'
+        f'<span class="{b_class}" style="background:{PROPERTY_COLORS["Bumbershoot"]};"></span>'
+        f'<span class="{c_class}" style="background:{PROPERTY_COLORS["Cannonball Arts"]};"></span>'
+        f'</span>'
+    )
 
 
 def _render_deal_panel(data: pd.DataFrame, title: str) -> None:
-    st.markdown(f'<div class="deal-card-shell"><div class="deal-panel-title">{escape(title)}</div>', unsafe_allow_html=True)
-
     if data.empty:
-        st.markdown('<div class="mini-note">No deals in this view yet.</div></div>', unsafe_allow_html=True)
+        st.markdown(
+            f'<div class="deal-card-shell"><div class="deal-panel-title">{escape(title)}</div><div class="mini-note">No deals in this view yet.</div></div>',
+            unsafe_allow_html=True,
+        )
         return
 
     max_expected = max(float(data[EXPECTED_COL].max()), 1.0)
@@ -793,9 +794,10 @@ def _render_deal_panel(data: pd.DataFrame, title: str) -> None:
         name = escape(str(row.get("Prospect (Account Name)", "Untitled Prospect")))
         current_value = format_currency(row.get(CURRENT_INVESTMENT_COL, 0))
         expected_value = format_currency(row.get(EXPECTED_COL, 0))
-        width_pct = max((float(row.get(EXPECTED_COL, 0)) / max_expected) * 100, 2 if float(row.get(EXPECTED_COL, 0)) > 0 else 0)
+        raw_expected = pd.to_numeric(pd.Series([row.get(EXPECTED_COL, 0)]), errors="coerce").fillna(0).iloc[0]
+        width_pct = max((float(raw_expected) / max_expected) * 100, 2 if float(raw_expected) > 0 else 0)
 
-        rows_html.append(
+        row_html = textwrap.dedent(
             f"""
             <div class="deal-row">
                 <div class="deal-header">
@@ -806,21 +808,23 @@ def _render_deal_panel(data: pd.DataFrame, title: str) -> None:
                             {_property_dots_html(row)}
                         </div>
                     </div>
-                    <span class="stage-pill" style="background:{stage_color}22; color:{stage_color};">{escape(stage)}</span>
+                    <span class="stage-pill" style="background:{stage_color}22; color:{stage_color};">{escape(str(stage))}</span>
                 </div>
                 <div class="deal-track">
                     <div class="deal-fill" style="width:{width_pct:.2f}%; background:{stage_color};"></div>
                 </div>
-                <div class="deal-meta">
-                    <strong>Current Proposed Investment</strong> {escape(current_value)}
-                    &nbsp;&nbsp;•&nbsp;&nbsp;
-                    <strong>Expected Value</strong> {escape(expected_value)}
-                </div>
+                <div class="deal-meta"><strong>Current Proposed Investment</strong> {escape(current_value)} &nbsp;&nbsp;&bull;&nbsp;&nbsp; <strong>Expected Value</strong> {escape(expected_value)}</div>
             </div>
             """
-        )
+        ).strip()
+        rows_html.append(row_html)
 
-    st.markdown("".join(rows_html) + "</div>", unsafe_allow_html=True)
+    panel_html = (
+        f'<div class="deal-card-shell"><div class="deal-panel-title">{escape(title)}</div>'
+        + "".join(rows_html)
+        + "</div>"
+    )
+    st.markdown(panel_html, unsafe_allow_html=True)
 
 
 def build_top_deals(prospects: pd.DataFrame) -> None:
@@ -983,6 +987,7 @@ def main() -> None:
         "Upload latest Excel workbook (.xlsx)",
         type=["xlsx"],
         accept_multiple_files=False,
+        key="pipeline_workbook_upload",
     )
 
     if uploaded is None:
@@ -1048,9 +1053,6 @@ def main() -> None:
 
     build_data_dictionary(data_dict)
 
-
-if __name__ == "__main__":
-    main()
 
 if __name__ == "__main__":
     main()
