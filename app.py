@@ -919,50 +919,6 @@ def build_pipeline_board(prospects: pd.DataFrame) -> None:
                             )
 
 
-def build_recent_activity_table(contacts: pd.DataFrame) -> None:
-    with st.expander("Recent Activity", expanded=False):
-        if contacts.empty:
-            st.caption("No contact activity logged yet.")
-            return
-
-        cols = [
-            "Prospect (Account Name)",
-            "Prospect (Sponsorship/Public)",
-            "Contact Date",
-            "Contact Type (email/phone/zoom/in-person)",
-            "Contact Owner",
-            "Contact Name",
-            "Outcome (left VM/spoke/meeting set/sent deck/etc.)",
-            "Next Step",
-        ]
-        cols = [c for c in cols if c in contacts.columns]
-
-        recent = (
-            contacts.sort_values("Contact Date", ascending=False)
-            .head(10)
-            .loc[:, cols]
-            .copy()
-        )
-
-        st.dataframe(
-            recent.style.format({"Contact Date": "{:%Y-%m-%d}"}),
-            hide_index=True,
-            use_container_width=True,
-        )
-
-
-def build_data_dictionary(data_dict: pd.DataFrame) -> None:
-    if data_dict is None or data_dict.empty:
-        return
-
-    with st.expander("Data Dictionary (field definitions)", expanded=False):
-        st.dataframe(
-            data_dict,
-            hide_index=True,
-            use_container_width=True,
-        )
-
-
 # -------------------------------------------------------------------
 # Main app
 # -------------------------------------------------------------------
