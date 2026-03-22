@@ -665,7 +665,7 @@ def build_goal_section(prospects: pd.DataFrame) -> None:
             f"""
             <div class="goal-card">
                 <div class="goal-header">
-                    <div class="goal-title">Public Investment closed dollars</div>
+                    <div class="goal-title">Public Investment Value</div>
                     <div class="goal-pill">No cap - bar grows with new closed deals</div>
                 </div>
                 <div class="goal-track">
