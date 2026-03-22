@@ -986,7 +986,7 @@ def main() -> None:
         st.rerun()
 
     # Load from saved bytes instead of directly from uploaded
-    prospects, contacts, data_dict = load_workbook(
+    prospects, _, _ = load_workbook(
         io.BytesIO(st.session_state.workbook_bytes)
     )
 
@@ -1022,8 +1022,6 @@ def main() -> None:
         st.warning("No deals match the selected filters.")
         st.stop()
 
-    filtered_contacts = _filter_contacts_to_visible_prospects(contacts, filtered_prospects)
-
     build_goal_section(filtered_prospects)
     st.divider()
 
@@ -1037,10 +1035,8 @@ def main() -> None:
     st.divider()
 
     build_pipeline_board(filtered_prospects)
-    st.divider()
-
-    build_data_dictionary(data_dict)
 
 
 if __name__ == "__main__":
     main()
+
