@@ -8,6 +8,8 @@ import numpy as np
 import pandas as pd
 import streamlit as st
 import altair as alt
+import io
+from pathlib import Path
 
 # -------------------------------------------------------------------
 # Config / constants
@@ -980,6 +982,16 @@ def main() -> None:
         "**Sponsorship** and **Public Investment**."
     )
 
+    # Server-side fallback file
+    LAST_UPLOAD_PATH = Path("data/last_uploaded_pipeline.xlsx")
+    LAST_UPLOAD_PATH.parent.mkdir(parents=True, exist_ok=True)
+
+    # Session state setup
+    if "workbook_bytes" not in st.session_state:
+        st.session_state.workbook_bytes = None
+    if "workbook_name" not in st.session_state:
+        st.session_state.workbook_name = None
+
     st.sidebar.header("Data source")
     uploaded = st.sidebar.file_uploader(
         "Upload latest Excel workbook (.xlsx)",
@@ -988,14 +1000,39 @@ def main() -> None:
         key="pipeline_workbook_upload",
     )
 
-    if uploaded is None:
+    # If user uploads a new workbook, save it to session + disk
+    if uploaded is not None:
+        file_bytes = uploaded.getvalue()
+        st.session_state.workbook_bytes = file_bytes
+        st.session_state.workbook_name = uploaded.name
+        LAST_UPLOAD_PATH.write_bytes(file_bytes)
+
+    # If nothing is in session, try loading the most recent saved workbook from disk
+    if st.session_state.workbook_bytes is None and LAST_UPLOAD_PATH.exists():
+        st.session_state.workbook_bytes = LAST_UPLOAD_PATH.read_bytes()
+        st.session_state.workbook_name = LAST_UPLOAD_PATH.name
+
+    # Stop only if we truly have nothing available
+    if st.session_state.workbook_bytes is None:
         st.info(
             "⬅️ Please upload the latest Excel workbook to see the dashboard.\n\n"
             "Recommended: use the file you update weekly before your team meeting."
         )
         st.stop()
 
-    prospects, contacts, data_dict = load_workbook(uploaded)
+    st.sidebar.caption(f"Using saved workbook: **{st.session_state.workbook_name}**")
+
+    if st.sidebar.button("Clear saved workbook"):
+        st.session_state.workbook_bytes = None
+        st.session_state.workbook_name = None
+        if LAST_UPLOAD_PATH.exists():
+            LAST_UPLOAD_PATH.unlink()
+        st.rerun()
+
+    # Load from saved bytes instead of directly from uploaded
+    prospects, contacts, data_dict = load_workbook(
+        io.BytesIO(st.session_state.workbook_bytes)
+    )
 
     st.sidebar.header("Filters")
 
@@ -1054,4 +1091,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-
