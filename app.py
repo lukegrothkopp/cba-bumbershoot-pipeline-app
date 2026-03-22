@@ -1039,9 +1039,6 @@ def main() -> None:
     build_pipeline_board(filtered_prospects)
     st.divider()
 
-    build_recent_activity_table(filtered_contacts)
-    st.divider()
-
     build_data_dictionary(data_dict)
 
 
