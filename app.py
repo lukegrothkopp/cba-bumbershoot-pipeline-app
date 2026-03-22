@@ -654,7 +654,6 @@ def build_goal_section(prospects: pd.DataFrame) -> None:
                     <span>{format_currency(sponsorship_goal)}</span>
                 </div>
                 <div class="goal-main-number">{format_currency(sponsorship_closed)}</div>
-                <div class="goal-note">Closed Sponsorship dollars are using contracted value when available, otherwise current proposed investment on contracted deals.</div>
             </div>
             """,
             unsafe_allow_html=True,
@@ -676,7 +675,6 @@ def build_goal_section(prospects: pd.DataFrame) -> None:
                     <span>{format_currency(public_scale)}</span>
                 </div>
                 <div class="goal-main-number">{format_currency(public_closed)}</div>
-                <div class="goal-note">This bar uses a flexible scale so the visual keeps expanding as more Public Investment deals close.</div>
             </div>
             """,
             unsafe_allow_html=True,
