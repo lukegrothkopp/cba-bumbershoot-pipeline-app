@@ -352,6 +352,32 @@ def apply_custom_css() -> None:
                 margin-top: -0.15rem;
                 margin-bottom: 0.8rem;
             }
+
+            .interest-pills {
+                display: inline-flex;
+                align-items: center;
+                gap: 8px;
+                flex-wrap: wrap;
+            }
+
+            .interest-pill {
+                display: inline-flex;
+                align-items: center;
+                justify-content: center;
+                padding: 5px 12px;
+                border-radius: 999px;
+                font-size: 0.76rem;
+                font-weight: 700;
+                line-height: 1;
+                white-space: nowrap;
+                border: 1px solid transparent;
+            }
+
+            .deal-interest-row {
+                margin-top: 6px;
+                margin-left: 32px;
+            }
+            
         </style>
         """,
         unsafe_allow_html=True,
@@ -762,17 +788,79 @@ def build_pipeline_totals(prospects: pd.DataFrame) -> None:
 
 
 def _build_interest_pills_html(row: pd.Series) -> str:
-    pills = []
-    if bool(row.get("Has Bumbershoot Interest", False)):
-        pills.append('<span class="interest-pill bumbershoot">Bumbershoot</span>')
-    if bool(row.get("Has Cannonball Interest", False)):
-        pills.append('<span class="interest-pill cannonball">Cannonball Arts</span>')
-
-    if not pills:
+    raw = str(row.get(INTEREST_COL, "") or "").strip()
+    if not raw:
         return ""
 
-    return f'<div class="deal-interest-row"><div class="interest-pills">{"".join(pills)}</div></div>'
+    items = [item.strip() for item in raw.split(";") if item.strip()]
+    if not items:
+        return ""
 
+    INTEREST_STYLES = {
+        "Bumbershoot": {
+            "bg": "rgba(139, 92, 246, 0.18)",
+            "text": "#c4b5fd",
+            "border": "rgba(139, 92, 246, 0.35)",
+        },
+        "Cannonball Arts": {
+            "bg": "rgba(6, 182, 212, 0.18)",
+            "text": "#67e8f9",
+            "border": "rgba(6, 182, 212, 0.35)",
+        },
+        "Level1": {
+            "bg": "rgba(34, 197, 94, 0.18)",
+            "text": "#86efac",
+            "border": "rgba(34, 197, 94, 0.35)",
+        },
+        "Art Install": {
+            "bg": "rgba(249, 115, 22, 0.18)",
+            "text": "#fdba74",
+            "border": "rgba(249, 115, 22, 0.35)",
+        },
+        "IP": {
+            "bg": "rgba(236, 72, 153, 0.18)",
+            "text": "#f9a8d4",
+            "border": "rgba(236, 72, 153, 0.35)",
+        },
+        "Fashion District": {
+            "bg": "rgba(168, 85, 247, 0.18)",
+            "text": "#d8b4fe",
+            "border": "rgba(168, 85, 247, 0.35)",
+        },
+        "Recess": {
+            "bg": "rgba(234, 179, 8, 0.18)",
+            "text": "#fde68a",
+            "border": "rgba(234, 179, 8, 0.35)",
+        },
+        "Entitlement": {
+            "bg": "rgba(239, 68, 68, 0.18)",
+            "text": "#fca5a5",
+            "border": "rgba(239, 68, 68, 0.35)",
+        },
+        "Distribution": {
+            "bg": "rgba(20, 184, 166, 0.18)",
+            "text": "#99f6e4",
+            "border": "rgba(20, 184, 166, 0.35)",
+        },
+    }
+
+    default_style = {
+        "bg": "rgba(148, 163, 184, 0.16)",
+        "text": "#cbd5e1",
+        "border": "rgba(148, 163, 184, 0.28)",
+    }
+
+    pills = []
+    for item in items:
+        style = INTEREST_STYLES.get(item, default_style)
+        pills.append(
+            f'<span class="interest-pill" '
+            f'style="background:{style["bg"]}; color:{style["text"]}; border-color:{style["border"]};">'
+            f'{escape(item)}'
+            f'</span>'
+        )
+
+    return f'<div class="deal-interest-row"><div class="interest-pills">{"".join(pills)}</div></div>'
 
 def _render_deal_panel(data: pd.DataFrame, title: str) -> None:
     if data.empty:
