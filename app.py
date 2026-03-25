@@ -202,27 +202,36 @@ def apply_custom_css() -> None:
                 font-size: 0.92rem;
             }
 
-            .legend-row {
-                display: flex;
-                flex-wrap: wrap;
-                gap: 18px;
-                align-items: center;
-                margin: 0 0 10px 0;
-                color: var(--muted);
-                font-size: 0.9rem;
-            }
-
-            .legend-item {
+            .interest-pills {
                 display: inline-flex;
                 align-items: center;
                 gap: 8px;
+                flex-wrap: wrap;
             }
 
-            .legend-dot {
-                width: 10px;
-                height: 10px;
+            .interest-pill {
+                display: inline-flex;
+                align-items: center;
+                justify-content: center;
+                padding: 5px 12px;
                 border-radius: 999px;
-                display: inline-block;
+                font-size: 0.76rem;
+                font-weight: 700;
+                line-height: 1;
+                white-space: nowrap;
+                border: 1px solid transparent;
+            }
+
+            .interest-pill.bumbershoot {
+                background: rgba(139, 92, 246, 0.18);
+                color: #c4b5fd;
+                border-color: rgba(139, 92, 246, 0.35);
+            }
+
+            .interest-pill.cannonball {
+                background: rgba(6, 182, 212, 0.18);
+                color: #67e8f9;
+                border-color: rgba(6, 182, 212, 0.35);
             }
 
             .deal-card-shell {
@@ -295,23 +304,9 @@ def apply_custom_css() -> None:
                 white-space: nowrap;
             }
 
-            .property-dots {
-                display: inline-flex;
-                align-items: center;
-                gap: 6px;
-            }
-
-            .property-dot {
-                width: 10px;
-                height: 10px;
-                border-radius: 999px;
-                display: inline-block;
-                border: 1px solid rgba(255,255,255,0.14);
-            }
-
-            .property-dot.inactive {
-                background: rgba(148, 163, 184, 0.16) !important;
-                border-color: rgba(148, 163, 184, 0.12);
+            .deal-interest-row {
+                margin-top: 6px;
+                margin-left: 32px;
             }
 
             .deal-track {
@@ -766,15 +761,17 @@ def build_pipeline_totals(prospects: pd.DataFrame) -> None:
     st.altair_chart(chart, use_container_width=True)
 
 
-def _property_dots_html(row: pd.Series) -> str:
-    b_class = "property-dot" if bool(row.get("Has Bumbershoot Interest", False)) else "property-dot inactive"
-    c_class = "property-dot" if bool(row.get("Has Cannonball Interest", False)) else "property-dot inactive"
-    return (
-        f'<span class="property-dots">'
-        f'<span class="{b_class}" style="background:{PROPERTY_COLORS["Bumbershoot"]};"></span>'
-        f'<span class="{c_class}" style="background:{PROPERTY_COLORS["Cannonball Arts"]};"></span>'
-        f'</span>'
-    )
+def _build_interest_pills_html(row: pd.Series) -> str:
+    pills = []
+    if bool(row.get("Has Bumbershoot Interest", False)):
+        pills.append('<span class="interest-pill bumbershoot">Bumbershoot</span>')
+    if bool(row.get("Has Cannonball Interest", False)):
+        pills.append('<span class="interest-pill cannonball">Cannonball Arts</span>')
+
+    if not pills:
+        return ""
+
+    return f'<div class="deal-interest-row"><div class="interest-pills">{"".join(pills)}</div></div>'
 
 
 def _render_deal_panel(data: pd.DataFrame, title: str) -> None:
@@ -796,6 +793,7 @@ def _render_deal_panel(data: pd.DataFrame, title: str) -> None:
         expected_value = format_currency(row.get(EXPECTED_COL, 0))
         raw_expected = pd.to_numeric(pd.Series([row.get(EXPECTED_COL, 0)]), errors="coerce").fillna(0).iloc[0]
         width_pct = max((float(raw_expected) / max_expected) * 100, 2 if float(raw_expected) > 0 else 0)
+        interest_html = _build_interest_pills_html(row)
 
         row_html = textwrap.dedent(
             f"""
@@ -805,8 +803,8 @@ def _render_deal_panel(data: pd.DataFrame, title: str) -> None:
                         <div class="deal-rank-name">
                             <span class="deal-rank">#{i + 1}</span>
                             <span class="deal-name">{name}</span>
-                            {_property_dots_html(row)}
                         </div>
+                        {interest_html}
                     </div>
                     <span class="stage-pill" style="background:{stage_color}22; color:{stage_color};">{escape(str(stage))}</span>
                 </div>
@@ -829,15 +827,6 @@ def _render_deal_panel(data: pd.DataFrame, title: str) -> None:
 
 def build_top_deals(prospects: pd.DataFrame) -> None:
     st.markdown('<div class="dashboard-section-title">Top 15 Deals by Expected Value</div>', unsafe_allow_html=True)
-    st.markdown(
-        f"""
-        <div class="legend-row">
-            <span class="legend-item"><span class="legend-dot" style="background:{PROPERTY_COLORS['Bumbershoot']};"></span>Bumbershoot selected</span>
-            <span class="legend-item"><span class="legend-dot" style="background:{PROPERTY_COLORS['Cannonball Arts']};"></span>Cannonball Arts selected</span>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
 
     def _top_n(df: pd.DataFrame, partner_type: str, n: int = 15) -> pd.DataFrame:
         sub = df[df[PARTNER_TYPE_COL] == partner_type].copy()
@@ -1039,4 +1028,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-
