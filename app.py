@@ -795,26 +795,24 @@ def _render_deal_panel(data: pd.DataFrame, title: str) -> None:
         width_pct = max((float(raw_expected) / max_expected) * 100, 2 if float(raw_expected) > 0 else 0)
         interest_html = _build_interest_pills_html(row)
 
-        row_html = textwrap.dedent(
-            f"""
-            <div class="deal-row">
-                <div class="deal-header">
-                    <div class="deal-left">
-                        <div class="deal-rank-name">
-                            <span class="deal-rank">#{i + 1}</span>
-                            <span class="deal-name">{name}</span>
-                        </div>
-                        {interest_html}
-                    </div>
-                    <span class="stage-pill" style="background:{stage_color}22; color:{stage_color};">{escape(str(stage))}</span>
-                </div>
-                <div class="deal-track">
-                    <div class="deal-fill" style="width:{width_pct:.2f}%; background:{stage_color};"></div>
-                </div>
-                <div class="deal-meta"><strong>Current Proposed Investment</strong> {escape(current_value)} &nbsp;&nbsp;&bull;&nbsp;&nbsp; <strong>Expected Value</strong> {escape(expected_value)}</div>
-            </div>
-            """
-        ).strip()
+        row_html = (
+            f'<div class="deal-row">'
+            f'<div class="deal-header">'
+            f'<div class="deal-left">'
+            f'<div class="deal-rank-name">'
+            f'<span class="deal-rank">#{i + 1}</span>'
+            f'<span class="deal-name">{name}</span>'
+            f'</div>'
+            f'{interest_html}'
+            f'</div>'
+            f'<span class="stage-pill" style="background:{stage_color}22; color:{stage_color};">{escape(str(stage))}</span>'
+            f'</div>'
+            f'<div class="deal-track">'
+            f'<div class="deal-fill" style="width:{width_pct:.2f}%; background:{stage_color};"></div>'
+            f'</div>'
+            f'<div class="deal-meta"><strong>Current Proposed Investment</strong> {escape(current_value)} &nbsp;&nbsp;&bull;&nbsp;&nbsp; <strong>Expected Value</strong> {escape(expected_value)}</div>'
+            f'</div>'
+        )
         rows_html.append(row_html)
 
     panel_html = (
