@@ -777,7 +777,7 @@ def build_goal_section(prospects: pd.DataFrame) -> None:
 def build_key_conversations_section(key_conversations: list[str]) -> None:
     st.markdown('<div class="dashboard-section-title">Key Conversations</div>', unsafe_allow_html=True)
     st.markdown(
-        '<div class="dashboard-section-subtitle">Weekly priority brand Conversations.</div>',
+        '<div class="dashboard-section-subtitle">Weekly priority brand conversations.</div>',
         unsafe_allow_html=True,
     )
 
