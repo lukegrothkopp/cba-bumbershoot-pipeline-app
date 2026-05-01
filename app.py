@@ -19,6 +19,8 @@ SPONSORSHIP_SHEET = "Sponsorships"
 PUBLIC_INVESTMENT_SHEET = "Public Investment"
 CONTACT_DETAIL_SHEET = "Contact Detail"
 DATA_DICTIONARY_SHEET = "Data_Dictionary"
+KEY_CONVERSATIONS_SHEET = "Key Conversations"
+KEY_CONVERSATION_COL = "Brand"
 
 PARTNER_TYPE_COL = "Partner Type"
 CURRENT_INVESTMENT_COL = "Current Proposed Investment"
@@ -198,6 +200,40 @@ def apply_custom_css() -> None:
 
             .goal-note {
                 margin-top: 6px;
+                color: var(--muted);
+                font-size: 0.92rem;
+            }
+
+            .key-conversations-card {
+                background: linear-gradient(180deg, rgba(23,32,51,.96), rgba(17,24,39,.96));
+                border: 1px solid var(--border);
+                border-radius: 20px;
+                box-shadow: var(--shadow);
+                padding: 18px 20px;
+            }
+
+            .key-conversations-row {
+                display: flex;
+                align-items: center;
+                gap: 10px;
+                flex-wrap: wrap;
+            }
+
+            .key-conversation-bubble {
+                display: inline-flex;
+                align-items: center;
+                justify-content: center;
+                padding: 9px 16px;
+                border-radius: 999px;
+                font-size: 0.92rem;
+                font-weight: 750;
+                line-height: 1;
+                white-space: nowrap;
+                border: 1px solid rgba(255,255,255,0.10);
+                box-shadow: 0 8px 18px rgba(2, 8, 23, 0.18);
+            }
+
+            .key-conversations-empty {
                 color: var(--muted);
                 font-size: 0.92rem;
             }
@@ -478,16 +514,50 @@ def _filter_contacts_to_visible_prospects(
     return contacts[mask].copy()
 
 
+def _extract_key_conversation_brands(raw_df: pd.DataFrame) -> list[str]:
+    if raw_df.empty:
+        return []
+
+    cols = [str(col).strip() for col in raw_df.columns]
+    raw_df = raw_df.copy()
+    raw_df.columns = cols
+
+    brand_col = KEY_CONVERSATION_COL if KEY_CONVERSATION_COL in raw_df.columns else raw_df.columns[0]
+
+    brands: list[str] = []
+    seen = set()
+
+    for value in raw_df[brand_col].dropna().tolist():
+        name = str(value).strip()
+        key = name.lower()
+        if not name or key in {"none", "n/a", "na"}:
+            continue
+        if key not in seen:
+            brands.append(name)
+            seen.add(key)
+
+    return brands
+
+
 # -------------------------------------------------------------------
 # Data loading
 # -------------------------------------------------------------------
 
-def load_workbook(xlsx_file) -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+def load_workbook(xlsx_file) -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, list[str]]:
     try:
-        sponsorships = pd.read_excel(xlsx_file, sheet_name=SPONSORSHIP_SHEET)
-        public = pd.read_excel(xlsx_file, sheet_name=PUBLIC_INVESTMENT_SHEET)
-        contacts = pd.read_excel(xlsx_file, sheet_name=CONTACT_DETAIL_SHEET)
-        data_dict = pd.read_excel(xlsx_file, sheet_name=DATA_DICTIONARY_SHEET)
+        if hasattr(xlsx_file, "seek"):
+            xlsx_file.seek(0)
+        xls = pd.ExcelFile(xlsx_file)
+        sponsorships = pd.read_excel(xls, sheet_name=SPONSORSHIP_SHEET)
+        public = pd.read_excel(xls, sheet_name=PUBLIC_INVESTMENT_SHEET)
+        contacts = pd.read_excel(xls, sheet_name=CONTACT_DETAIL_SHEET)
+        data_dict = pd.read_excel(xls, sheet_name=DATA_DICTIONARY_SHEET)
+
+        if KEY_CONVERSATIONS_SHEET in xls.sheet_names:
+            key_conversation_df = pd.read_excel(xls, sheet_name=KEY_CONVERSATIONS_SHEET)
+            key_conversations = _extract_key_conversation_brands(key_conversation_df)
+        else:
+            key_conversations = []
     except Exception as e:
         st.error("There was a problem reading one or more sheets from the workbook.")
         st.exception(e)
@@ -624,7 +694,7 @@ def load_workbook(xlsx_file) -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
         if col in contacts.columns:
             contacts[col] = pd.to_datetime(contacts[col], errors="coerce")
 
-    return prospects, contacts, data_dict
+    return prospects, contacts, data_dict, key_conversations
 
 
 # -------------------------------------------------------------------
@@ -702,6 +772,52 @@ def build_goal_section(prospects: pd.DataFrame) -> None:
             """,
             unsafe_allow_html=True,
         )
+
+
+def build_key_conversations_section(key_conversations: list[str]) -> None:
+    st.markdown('<div class="dashboard-section-title">Key Conversations</div>', unsafe_allow_html=True)
+    st.markdown(
+        '<div class="dashboard-section-subtitle">Weekly priority brands pulled directly from the Key Conversations sheet in your workbook.</div>',
+        unsafe_allow_html=True,
+    )
+
+    if not key_conversations:
+        st.markdown(
+            """
+            <div class="key-conversations-card">
+                <div class="key-conversations-empty">No key conversations added yet. Add brand names to the <strong>Key Conversations</strong> sheet in the workbook.</div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+        return
+
+    bubble_styles = [
+        {"bg": "rgba(139, 92, 246, 0.22)", "text": "#ddd6fe", "border": "rgba(139, 92, 246, 0.45)"},
+        {"bg": "rgba(6, 182, 212, 0.20)", "text": "#a5f3fc", "border": "rgba(6, 182, 212, 0.42)"},
+        {"bg": "rgba(34, 197, 94, 0.18)", "text": "#bbf7d0", "border": "rgba(34, 197, 94, 0.38)"},
+        {"bg": "rgba(249, 115, 22, 0.18)", "text": "#fed7aa", "border": "rgba(249, 115, 22, 0.38)"},
+        {"bg": "rgba(236, 72, 153, 0.18)", "text": "#fbcfe8", "border": "rgba(236, 72, 153, 0.38)"},
+    ]
+
+    bubbles = []
+    for i, brand in enumerate(key_conversations):
+        style = bubble_styles[i % len(bubble_styles)]
+        bubbles.append(
+            f'<span class="key-conversation-bubble" '
+            f'style="background:{style["bg"]}; color:{style["text"]}; border-color:{style["border"]};">'
+            f'{escape(str(brand))}'
+            f'</span>'
+        )
+
+    st.markdown(
+        f"""
+        <div class="key-conversations-card">
+            <div class="key-conversations-row">{''.join(bubbles)}</div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
 
 
 def build_snapshot_section(prospects: pd.DataFrame) -> None:
@@ -1061,7 +1177,7 @@ def main() -> None:
         st.rerun()
 
     # Load from saved bytes instead of directly from uploaded
-    prospects, _, _ = load_workbook(
+    prospects, _, _, key_conversations = load_workbook(
         io.BytesIO(st.session_state.workbook_bytes)
     )
 
@@ -1098,6 +1214,9 @@ def main() -> None:
         st.stop()
 
     build_goal_section(filtered_prospects)
+    st.divider()
+
+    build_key_conversations_section(key_conversations)
     st.divider()
 
     build_snapshot_section(filtered_prospects)
