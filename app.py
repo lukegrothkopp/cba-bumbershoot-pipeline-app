@@ -52,6 +52,14 @@ PROPERTY_COLORS = {
     "Cannonball Arts": "#06b6d4",
 }
 
+# Short display names for the closed-business bubbles in the 2026 Goal card.
+# Extend this dictionary if a row name in the workbook should display more cleanly.
+CLOSED_BUSINESS_DISPLAY_NAMES = {
+    "WW Toyota Dealers": "Toyota",
+    "Monster Energy": "Monster",
+    "Westland Distillery": "Westland",
+}
+
 
 # -------------------------------------------------------------------
 # Styling
@@ -196,6 +204,39 @@ def apply_custom_css() -> None:
                 line-height: 1.05;
                 font-weight: 750;
                 color: var(--text);
+            }
+
+            .goal-main-row {
+                display: flex;
+                align-items: center;
+                gap: 12px;
+                flex-wrap: wrap;
+                margin-top: 14px;
+            }
+
+            .goal-main-row .goal-main-number {
+                margin-top: 0;
+            }
+
+            .goal-closed-bubbles {
+                display: inline-flex;
+                align-items: center;
+                gap: 7px;
+                flex-wrap: wrap;
+            }
+
+            .goal-closed-bubble {
+                display: inline-flex;
+                align-items: center;
+                justify-content: center;
+                padding: 6px 11px;
+                border-radius: 999px;
+                font-size: 0.76rem;
+                font-weight: 750;
+                line-height: 1;
+                white-space: nowrap;
+                border: 1px solid rgba(255,255,255,0.10);
+                box-shadow: 0 7px 14px rgba(2, 8, 23, 0.16);
             }
 
             .goal-note {
@@ -697,6 +738,58 @@ def load_workbook(xlsx_file) -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, 
     return prospects, contacts, data_dict, key_conversations
 
 
+def _display_closed_business_brand_name(name: str) -> str:
+    clean_name = str(name or "").strip()
+    return CLOSED_BUSINESS_DISPLAY_NAMES.get(clean_name, clean_name)
+
+
+def _extract_closed_business_brands(closed_df: pd.DataFrame, partner_type: str) -> list[str]:
+    if closed_df.empty or PARTNER_TYPE_COL not in closed_df.columns:
+        return []
+
+    sub = closed_df[closed_df[PARTNER_TYPE_COL] == partner_type].copy()
+    if sub.empty or "Prospect (Account Name)" not in sub.columns:
+        return []
+
+    brands: list[str] = []
+    seen = set()
+
+    for value in sub["Prospect (Account Name)"].dropna().tolist():
+        display_name = _display_closed_business_brand_name(value)
+        key = display_name.lower()
+        if not display_name or key in seen:
+            continue
+        brands.append(display_name)
+        seen.add(key)
+
+    return brands
+
+
+def _build_goal_closed_bubbles_html(brands: list[str]) -> str:
+    if not brands:
+        return ""
+
+    bubble_styles = [
+        {"bg": "rgba(139, 92, 246, 0.22)", "text": "#ddd6fe", "border": "rgba(139, 92, 246, 0.45)"},
+        {"bg": "rgba(6, 182, 212, 0.20)", "text": "#a5f3fc", "border": "rgba(6, 182, 212, 0.42)"},
+        {"bg": "rgba(34, 197, 94, 0.18)", "text": "#bbf7d0", "border": "rgba(34, 197, 94, 0.38)"},
+        {"bg": "rgba(249, 115, 22, 0.18)", "text": "#fed7aa", "border": "rgba(249, 115, 22, 0.38)"},
+        {"bg": "rgba(236, 72, 153, 0.18)", "text": "#fbcfe8", "border": "rgba(236, 72, 153, 0.38)"},
+    ]
+
+    bubbles = []
+    for i, brand in enumerate(brands):
+        style = bubble_styles[i % len(bubble_styles)]
+        bubbles.append(
+            f'<span class="goal-closed-bubble" '
+            f'style="background:{style["bg"]}; color:{style["text"]}; border-color:{style["border"]};">'
+            f'{escape(str(brand))}'
+            f'</span>'
+        )
+
+    return f'<div class="goal-closed-bubbles">{"".join(bubbles)}</div>'
+
+
 # -------------------------------------------------------------------
 # Section builders
 # -------------------------------------------------------------------
@@ -723,6 +816,9 @@ def build_goal_section(prospects: pd.DataFrame) -> None:
         closed_df[PARTNER_TYPE_COL] == "Public Investment", "Closed Value"
     ].sum()
 
+    sponsorship_closed_brands = _extract_closed_business_brands(closed_df, "Sponsorship")
+    sponsorship_closed_bubbles_html = _build_goal_closed_bubbles_html(sponsorship_closed_brands)
+
     sponsorship_goal = 1_000_000
     public_scale = nice_ceiling(max(public_closed * 1.15, 50000))
 
@@ -746,7 +842,10 @@ def build_goal_section(prospects: pd.DataFrame) -> None:
                     <span>{format_currency(0)}</span>
                     <span>{format_currency(sponsorship_goal)}</span>
                 </div>
-                <div class="goal-main-number">{format_currency(sponsorship_closed)}</div>
+                <div class="goal-main-row">
+                    <div class="goal-main-number">{format_currency(sponsorship_closed)}</div>
+                    {sponsorship_closed_bubbles_html}
+                </div>
             </div>
             """,
             unsafe_allow_html=True,
@@ -777,7 +876,7 @@ def build_goal_section(prospects: pd.DataFrame) -> None:
 def build_key_conversations_section(key_conversations: list[str]) -> None:
     st.markdown('<div class="dashboard-section-title">Key Conversations</div>', unsafe_allow_html=True)
     st.markdown(
-        '<div class="dashboard-section-subtitle">Weekly priority brand conversations.</div>',
+        '<div class="dashboard-section-subtitle">Weekly priority brands pulled directly from the Key Conversations sheet in your workbook.</div>',
         unsafe_allow_html=True,
     )
 
