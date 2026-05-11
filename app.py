@@ -22,6 +22,16 @@ DATA_DICTIONARY_SHEET = "Data_Dictionary"
 KEY_CONVERSATIONS_SHEET = "Key Conversations"
 KEY_CONVERSATION_COL = "Brand"
 
+# Optional workbook sheet used to break out the BizX portion of the closed sponsorship goal.
+# Recommended sheet name: BizX Details
+# Supported column names include Brand, Detail, Amount, and Active.
+BIZX_DETAILS_SHEET = "BizX Details"
+BIZX_DETAILS_SHEET_ALIASES = ["BizX Details", "BizX Breakdown", "BizX", "BizX Investment"]
+BIZX_BRAND_COL = "Brand"
+BIZX_DETAIL_COL = "Detail"
+BIZX_AMOUNT_COL = "Amount"
+BIZX_ACTIVE_COL = "Active"
+
 PARTNER_TYPE_COL = "Partner Type"
 CURRENT_INVESTMENT_COL = "Current Proposed Investment"
 CONTRACTED_COL = "Contracted Annual Revenue ($)"
@@ -187,6 +197,58 @@ def apply_custom_css() -> None:
                 left: 0;
                 height: 100%;
                 border-radius: 999px;
+            }
+
+            .goal-fill-standard {
+                background: linear-gradient(90deg, #16a34a, #22c55e);
+            }
+
+            .goal-fill-bizx {
+                background: linear-gradient(90deg, #0d9488, #2dd4bf);
+                box-shadow: inset 1px 0 0 rgba(255,255,255,0.18);
+            }
+
+            .bizx-goal-note {
+                margin-top: 10px;
+                display: flex;
+                align-items: center;
+                gap: 8px;
+                color: #99f6e4;
+                font-size: 0.88rem;
+                font-weight: 650;
+            }
+
+            .bizx-legend-dot {
+                width: 10px;
+                height: 10px;
+                border-radius: 999px;
+                display: inline-block;
+                background: linear-gradient(90deg, #0d9488, #2dd4bf);
+                box-shadow: 0 0 0 3px rgba(45, 212, 191, 0.12);
+            }
+
+            .bizx-detail-bubbles {
+                display: flex;
+                align-items: center;
+                gap: 7px;
+                flex-wrap: wrap;
+                margin-top: 8px;
+            }
+
+            .bizx-detail-bubble {
+                display: inline-flex;
+                align-items: center;
+                justify-content: center;
+                padding: 6px 11px;
+                border-radius: 999px;
+                font-size: 0.75rem;
+                font-weight: 750;
+                line-height: 1;
+                white-space: nowrap;
+                background: rgba(13, 148, 136, 0.18);
+                color: #99f6e4;
+                border: 1px solid rgba(45, 212, 191, 0.38);
+                box-shadow: 0 7px 14px rgba(2, 8, 23, 0.16);
             }
 
             .goal-scale {
@@ -580,11 +642,209 @@ def _extract_key_conversation_brands(raw_df: pd.DataFrame) -> list[str]:
     return brands
 
 
+def _first_existing_column(df: pd.DataFrame, candidates: list[str]) -> str | None:
+    """Return the first matching column name from a list of likely aliases."""
+    normalized = {str(col).strip().lower(): col for col in df.columns}
+    for candidate in candidates:
+        match = normalized.get(candidate.strip().lower())
+        if match is not None:
+            return match
+    return None
+
+
+def _extract_bizx_details(raw_df: pd.DataFrame) -> pd.DataFrame:
+    """Normalize the optional BizX Details sheet into brand/detail/amount rows.
+
+    Recommended workbook sheet: `BizX Details`
+    Recommended columns: `Brand`, `Detail`, `Amount`, `Active`
+
+    `Active` is optional. If used, mark rows with Yes/True/X/1 to include them.
+    `Amount` is optional, but the app needs it to size the BizX bar segment.
+    """
+    output_cols = [BIZX_BRAND_COL, BIZX_DETAIL_COL, BIZX_AMOUNT_COL]
+    if raw_df is None or raw_df.empty:
+        return pd.DataFrame(columns=output_cols)
+
+    df = raw_df.copy()
+    df.columns = [str(col).strip() for col in df.columns]
+
+    brand_col = _first_existing_column(
+        df,
+        [
+            "Brand",
+            "BizX Brand",
+            "Name",
+            "Line Item",
+            "Investment Source",
+            "Description",
+        ],
+    )
+    detail_col = _first_existing_column(
+        df,
+        [
+            "Detail",
+            "Details",
+            "BizX Detail",
+            "Description",
+            "Notes",
+            "Category",
+        ],
+    )
+    amount_col = _first_existing_column(
+        df,
+        [
+            "Amount",
+            "Value",
+            "BizX Amount",
+            "Investment",
+            "BizX Investment",
+            "Closed Value",
+            "Closed Amount",
+            "Contracted Annual Revenue ($)",
+            "Current Proposed Investment",
+        ],
+    )
+    active_col = _first_existing_column(df, ["Active", "Include", "Included", "Show", "Use"])
+
+    if brand_col is None:
+        brand_col = df.columns[0]
+
+    if active_col is not None:
+        df = df[df[active_col].apply(_is_flag)].copy()
+
+    rows = []
+    for _, row in df.iterrows():
+        brand = str(row.get(brand_col, "") or "").strip()
+        detail = str(row.get(detail_col, "") or "").strip() if detail_col else ""
+        amount = pd.to_numeric(pd.Series([row.get(amount_col, 0) if amount_col else 0]), errors="coerce").fillna(0).iloc[0]
+
+        if not brand or brand.lower() in {"none", "n/a", "na"}:
+            continue
+
+        rows.append(
+            {
+                BIZX_BRAND_COL: brand,
+                BIZX_DETAIL_COL: detail,
+                BIZX_AMOUNT_COL: float(amount),
+            }
+        )
+
+    return pd.DataFrame(rows, columns=output_cols)
+
+
+def _extract_bizx_details_from_closed_rows(closed_df: pd.DataFrame) -> pd.DataFrame:
+    """Fallback for workbooks that tag BizX directly in the Sponsorships sheet."""
+    output_cols = [BIZX_BRAND_COL, BIZX_DETAIL_COL, BIZX_AMOUNT_COL]
+    if closed_df.empty or "Prospect (Account Name)" not in closed_df.columns:
+        return pd.DataFrame(columns=output_cols)
+
+    sponsorship_df = closed_df[closed_df[PARTNER_TYPE_COL] == "Sponsorship"].copy()
+    if sponsorship_df.empty:
+        return pd.DataFrame(columns=output_cols)
+
+    bizx_flag_cols = [
+        col
+        for col in sponsorship_df.columns
+        if str(col).strip().lower() in {
+            "bizx",
+            "bizx?",
+            "is bizx",
+            "bizx investment",
+            "bizx flag",
+        }
+    ]
+
+    mask = sponsorship_df["Prospect (Account Name)"].astype(str).str.contains("bizx", case=False, na=False)
+    if INTEREST_COL in sponsorship_df.columns:
+        mask = mask | sponsorship_df[INTEREST_COL].astype(str).str.contains("bizx", case=False, na=False)
+
+    for col in bizx_flag_cols:
+        mask = mask | sponsorship_df[col].apply(_is_flag)
+
+    bizx_rows = sponsorship_df[mask].copy()
+    if bizx_rows.empty:
+        return pd.DataFrame(columns=output_cols)
+
+    bizx_rows["Closed Value"] = _closed_value_series(bizx_rows)
+
+    rows = []
+    for _, row in bizx_rows.iterrows():
+        rows.append(
+            {
+                BIZX_BRAND_COL: _display_closed_business_brand_name(row.get("Prospect (Account Name)", "BizX")),
+                BIZX_DETAIL_COL: "",
+                BIZX_AMOUNT_COL: float(row.get("Closed Value", 0) or 0),
+            }
+        )
+
+    return pd.DataFrame(rows, columns=output_cols)
+
+
+def _resolve_bizx_breakdown(
+    closed_df: pd.DataFrame,
+    bizx_details: pd.DataFrame,
+) -> tuple[float, pd.DataFrame]:
+    """Return the BizX closed amount and display rows.
+
+    Priority:
+    1. Use the optional BizX Details sheet if it contains dollar amounts.
+    2. If that sheet only has labels, pair those labels with the amount from BizX-tagged closed sponsorship rows.
+    3. If no detail sheet exists, use BizX-tagged closed sponsorship rows as a fallback.
+    """
+    detail_df = _extract_bizx_details(bizx_details) if bizx_details is not None else pd.DataFrame(columns=[BIZX_BRAND_COL, BIZX_DETAIL_COL, BIZX_AMOUNT_COL])
+    row_df = _extract_bizx_details_from_closed_rows(closed_df)
+
+    detail_amount = float(detail_df[BIZX_AMOUNT_COL].sum()) if not detail_df.empty else 0.0
+    row_amount = float(row_df[BIZX_AMOUNT_COL].sum()) if not row_df.empty else 0.0
+
+    if detail_amount > 0:
+        return detail_amount, detail_df
+
+    if not detail_df.empty and row_amount > 0:
+        return row_amount, detail_df
+
+    if row_amount > 0:
+        return row_amount, row_df
+
+    return 0.0, detail_df
+
+
+def _build_bizx_details_html(bizx_details: pd.DataFrame) -> str:
+    if bizx_details is None or bizx_details.empty:
+        return ""
+
+    bubbles = []
+    seen = set()
+
+    for _, row in bizx_details.iterrows():
+        brand = str(row.get(BIZX_BRAND_COL, "") or "").strip()
+        detail = str(row.get(BIZX_DETAIL_COL, "") or "").strip()
+        amount = float(row.get(BIZX_AMOUNT_COL, 0) or 0)
+
+        label = brand
+        if detail and detail.lower() != brand.lower():
+            label = f"{brand}: {detail}"
+        if amount > 0:
+            label = f"{label} · {format_currency(amount)}"
+
+        key = label.lower()
+        if not label or key in seen:
+            continue
+
+        bubbles.append(f'<span class="bizx-detail-bubble">{escape(label)}</span>')
+        seen.add(key)
+
+    if not bubbles:
+        return ""
+
+    return f'<div class="bizx-detail-bubbles">{"".join(bubbles)}</div>'
+
+
 # -------------------------------------------------------------------
 # Data loading
 # -------------------------------------------------------------------
 
-def load_workbook(xlsx_file) -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, list[str]]:
+def load_workbook(xlsx_file) -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, list[str], pd.DataFrame]:
     try:
         if hasattr(xlsx_file, "seek"):
             xlsx_file.seek(0)
@@ -599,6 +859,12 @@ def load_workbook(xlsx_file) -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, 
             key_conversations = _extract_key_conversation_brands(key_conversation_df)
         else:
             key_conversations = []
+
+        bizx_details = pd.DataFrame(columns=[BIZX_BRAND_COL, BIZX_DETAIL_COL, BIZX_AMOUNT_COL])
+        for sheet_name in BIZX_DETAILS_SHEET_ALIASES:
+            if sheet_name in xls.sheet_names:
+                bizx_details = _extract_bizx_details(pd.read_excel(xls, sheet_name=sheet_name))
+                break
     except Exception as e:
         st.error("There was a problem reading one or more sheets from the workbook.")
         st.exception(e)
@@ -735,7 +1001,7 @@ def load_workbook(xlsx_file) -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, 
         if col in contacts.columns:
             contacts[col] = pd.to_datetime(contacts[col], errors="coerce")
 
-    return prospects, contacts, data_dict, key_conversations
+    return prospects, contacts, data_dict, key_conversations, bizx_details
 
 
 def _display_closed_business_brand_name(name: str) -> str:
@@ -794,7 +1060,7 @@ def _build_goal_closed_bubbles_html(brands: list[str]) -> str:
 # Section builders
 # -------------------------------------------------------------------
 
-def build_goal_section(prospects: pd.DataFrame) -> None:
+def build_goal_section(prospects: pd.DataFrame, bizx_details: pd.DataFrame | None = None) -> None:
     st.markdown('<div class="dashboard-section-title">2026 Goal</div>', unsafe_allow_html=True)
     st.markdown(
         '<div class="dashboard-section-subtitle">Closed dollars at a glance for Sponsorship and Public Investment.</div>',
@@ -822,8 +1088,25 @@ def build_goal_section(prospects: pd.DataFrame) -> None:
     sponsorship_goal = 1_000_000
     public_scale = nice_ceiling(max(public_closed * 1.15, 50000))
 
+    raw_bizx_closed, bizx_breakdown_df = _resolve_bizx_breakdown(closed_df, bizx_details)
+    bizx_closed = min(max(raw_bizx_closed, 0.0), float(sponsorship_closed or 0.0))
+    standard_sponsorship_closed = max(float(sponsorship_closed or 0.0) - bizx_closed, 0.0)
+
+    standard_sponsorship_pct = min((standard_sponsorship_closed / sponsorship_goal) * 100, 100) if sponsorship_goal else 0
+    bizx_pct = min((bizx_closed / sponsorship_goal) * 100, max(100 - standard_sponsorship_pct, 0)) if sponsorship_goal else 0
     sponsorship_pct = min((sponsorship_closed / sponsorship_goal) * 100, 100) if sponsorship_goal else 0
     public_pct = min((public_closed / public_scale) * 100, 100) if public_scale else 0
+
+    bizx_details_html = _build_bizx_details_html(bizx_breakdown_df)
+    bizx_summary_html = ""
+    if bizx_closed > 0:
+        bizx_summary_html = (
+            f'<div class="bizx-goal-note">'
+            f'<span class="bizx-legend-dot"></span>'
+            f'<span>BizX portion: {format_currency(bizx_closed)}</span>'
+            f'</div>'
+            f'{bizx_details_html}'
+        )
 
     left, right = st.columns(2)
 
@@ -836,7 +1119,8 @@ def build_goal_section(prospects: pd.DataFrame) -> None:
                     <div class="goal-pill">{(sponsorship_closed / sponsorship_goal) * 100:.0f}% of goal</div>
                 </div>
                 <div class="goal-track">
-                    <div class="goal-fill" style="width:{sponsorship_pct:.2f}%; background:linear-gradient(90deg, #16a34a, #22c55e);"></div>
+                    <div class="goal-fill goal-fill-standard" style="width:{standard_sponsorship_pct:.2f}%;"></div>
+                    <div class="goal-fill goal-fill-bizx" style="left:{standard_sponsorship_pct:.2f}%; width:{bizx_pct:.2f}%;"></div>
                 </div>
                 <div class="goal-scale">
                     <span>{format_currency(0)}</span>
@@ -846,6 +1130,7 @@ def build_goal_section(prospects: pd.DataFrame) -> None:
                     <div class="goal-main-number">{format_currency(sponsorship_closed)}</div>
                     {sponsorship_closed_bubbles_html}
                 </div>
+                {bizx_summary_html}
             </div>
             """,
             unsafe_allow_html=True,
@@ -1276,7 +1561,7 @@ def main() -> None:
         st.rerun()
 
     # Load from saved bytes instead of directly from uploaded
-    prospects, _, _, key_conversations = load_workbook(
+    prospects, _, _, key_conversations, bizx_details = load_workbook(
         io.BytesIO(st.session_state.workbook_bytes)
     )
 
@@ -1312,7 +1597,7 @@ def main() -> None:
         st.warning("No deals match the selected filters.")
         st.stop()
 
-    build_goal_section(filtered_prospects)
+    build_goal_section(filtered_prospects, bizx_details)
     st.divider()
 
     build_key_conversations_section(key_conversations)
