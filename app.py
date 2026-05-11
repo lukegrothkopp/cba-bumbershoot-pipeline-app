@@ -1129,7 +1129,7 @@ def build_goal_section(prospects: pd.DataFrame, bizx_details: pd.DataFrame | Non
                     <div class="goal-fill goal-fill-bizx" style="left:{standard_sponsorship_pct:.2f}%; width:{bizx_pct:.2f}%;"></div>
                 </div>
                 <div class="goal-scale">
-                    <span>{format_currency(0)}</span>
+                    <span>{format_currency(total_sponsorship_goal_value)}</span>
                     <span>{format_currency(sponsorship_goal)}</span>
                 </div>
                 <div class="goal-main-row">
