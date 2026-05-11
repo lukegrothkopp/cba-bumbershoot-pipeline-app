@@ -1074,13 +1074,16 @@ def build_goal_section(prospects: pd.DataFrame, bizx_details: pd.DataFrame | Non
 
     closed_df["Closed Value"] = _closed_value_series(closed_df)
 
-    sponsorship_closed = closed_df.loc[
-        closed_df[PARTNER_TYPE_COL] == "Sponsorship", "Closed Value"
-    ].sum()
+    # Cash sponsorship closed dollars from the main Sponsorships sheet.
+    # BizX is treated as an ADDITIONAL closed-value layer from the optional BizX Details sheet,
+    # not as a subset to subtract from the cash sponsorship total.
+    cash_sponsorship_closed = float(
+        closed_df.loc[closed_df[PARTNER_TYPE_COL] == "Sponsorship", "Closed Value"].sum() or 0.0
+    )
 
-    public_closed = closed_df.loc[
-        closed_df[PARTNER_TYPE_COL] == "Public Investment", "Closed Value"
-    ].sum()
+    public_closed = float(
+        closed_df.loc[closed_df[PARTNER_TYPE_COL] == "Public Investment", "Closed Value"].sum() or 0.0
+    )
 
     sponsorship_closed_brands = _extract_closed_business_brands(closed_df, "Sponsorship")
     sponsorship_closed_bubbles_html = _build_goal_closed_bubbles_html(sponsorship_closed_brands)
@@ -1088,13 +1091,16 @@ def build_goal_section(prospects: pd.DataFrame, bizx_details: pd.DataFrame | Non
     sponsorship_goal = 1_000_000
     public_scale = nice_ceiling(max(public_closed * 1.15, 50000))
 
+    # Pull BizX detail rows from the BizX Details sheet when present.
+    # Example: $239K cash sponsorship + $190K BizX = $429K shown against the $1M goal.
     raw_bizx_closed, bizx_breakdown_df = _resolve_bizx_breakdown(closed_df, bizx_details)
-    bizx_closed = min(max(raw_bizx_closed, 0.0), float(sponsorship_closed or 0.0))
-    standard_sponsorship_closed = max(float(sponsorship_closed or 0.0) - bizx_closed, 0.0)
+    bizx_closed = max(float(raw_bizx_closed or 0.0), 0.0)
 
-    standard_sponsorship_pct = min((standard_sponsorship_closed / sponsorship_goal) * 100, 100) if sponsorship_goal else 0
+    total_sponsorship_goal_value = cash_sponsorship_closed + bizx_closed
+
+    standard_sponsorship_pct = min((cash_sponsorship_closed / sponsorship_goal) * 100, 100) if sponsorship_goal else 0
     bizx_pct = min((bizx_closed / sponsorship_goal) * 100, max(100 - standard_sponsorship_pct, 0)) if sponsorship_goal else 0
-    sponsorship_pct = min((sponsorship_closed / sponsorship_goal) * 100, 100) if sponsorship_goal else 0
+    sponsorship_pct = min((total_sponsorship_goal_value / sponsorship_goal) * 100, 100) if sponsorship_goal else 0
     public_pct = min((public_closed / public_scale) * 100, 100) if public_scale else 0
 
     bizx_details_html = _build_bizx_details_html(bizx_breakdown_df)
@@ -1116,7 +1122,7 @@ def build_goal_section(prospects: pd.DataFrame, bizx_details: pd.DataFrame | Non
             <div class="goal-card">
                 <div class="goal-header">
                     <div class="goal-title">Sponsorship closed vs. $1M goal</div>
-                    <div class="goal-pill">{(sponsorship_closed / sponsorship_goal) * 100:.0f}% of goal</div>
+                    <div class="goal-pill">{sponsorship_pct:.0f}% of goal</div>
                 </div>
                 <div class="goal-track">
                     <div class="goal-fill goal-fill-standard" style="width:{standard_sponsorship_pct:.2f}%;"></div>
@@ -1127,7 +1133,7 @@ def build_goal_section(prospects: pd.DataFrame, bizx_details: pd.DataFrame | Non
                     <span>{format_currency(sponsorship_goal)}</span>
                 </div>
                 <div class="goal-main-row">
-                    <div class="goal-main-number">{format_currency(sponsorship_closed)}</div>
+                    <div class="goal-main-number">{format_currency(total_sponsorship_goal_value)}</div>
                     {sponsorship_closed_bubbles_html}
                 </div>
                 {bizx_summary_html}
@@ -1156,7 +1162,6 @@ def build_goal_section(prospects: pd.DataFrame, bizx_details: pd.DataFrame | Non
             """,
             unsafe_allow_html=True,
         )
-
 
 def build_key_conversations_section(key_conversations: list[str]) -> None:
     st.markdown('<div class="dashboard-section-title">Key Conversations</div>', unsafe_allow_html=True)
